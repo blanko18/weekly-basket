@@ -1,0 +1,27 @@
+{
+  "name": "weekly-basket",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Weekly Basket: reusable grocery list templates, check-off and receipt reports. Android app built with Capacitor.",
+  "scripts": {
+    "www": "node scripts/prepare-www.mjs",
+    "android:add": "cap add android",
+    "android:sync": "npm run www && cap sync android",
+    "android:icons": "capacitor-assets generate --android",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/share": "^7.0.0",
+    "@fontsource/bricolage-grotesque": "^5.0.0",
+    "@fontsource/figtree": "^5.0.0",
+    "@fontsource/ibm-plex-mono": "^5.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  }
+}

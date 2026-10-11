@@ -1,0 +1,9 @@
+{
+  "appId": "ph.weeklybasket.app",
+  "appName": "Weekly Basket",
+  "webDir": "www",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto",
+    "backgroundColor": "#EEF3EE"
+  }
+}
