@@ -87,7 +87,9 @@ h2.eyebrow{font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:
 
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
 .dock-in{max-width:560px;margin:0 auto;display:grid;gap:8px}
-.addrow{display:flex;gap:8px}
+.addrow{display:flex;gap:8px;min-width:0}
+.addrow input{width:0}
+.addrow .btn.primary{flex:none;padding-inline:14px}
 .addrow input{flex:1;min-width:0;height:48px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);padding:0 14px;font-size:16px}
 .addrow input:focus{border-color:var(--accent);outline:none}
 .addrow .btn{height:48px}
@@ -134,6 +136,12 @@ h2.eyebrow{font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:
 .receipt .tot{font-size:1.15rem;font-weight:500}
 .receipt .miss{color:var(--warn)}
 .receipt .muted{color:var(--muted)}
+.addrow .btn.icon2{width:48px;padding:0;flex:none}
+.addrow .btn.icon2 svg{width:22px;height:22px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 14px;max-height:180px;overflow:auto}
+.chip{font-size:.85rem;padding:5px 10px;border-radius:99px;background:var(--accent-soft);color:var(--ink)}
+.chip small{color:var(--muted);margin-left:4px}
+.chip.dup{background:transparent;border:1px dashed var(--line);color:var(--muted);text-decoration:line-through}
 .pick{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line);cursor:pointer}
 .pick input{width:20px;height:20px;accent-color:var(--accent);flex:none}
 .pick span{flex:1;min-width:0;font-weight:600}
@@ -184,6 +192,7 @@ const ICON={
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  lines:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.5" cy="6" r="1" fill="currentColor"/><circle cx="3.5" cy="12" r="1" fill="currentColor"/><circle cx="3.5" cy="18" r="1" fill="currentColor"/></svg>',
   share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6"/></svg>',
   receipt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
   x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
@@ -317,7 +326,7 @@ function listView(){
   <div class="prog"><div class="bar"><i style="width:${n?d/n*100:0}%"></i></div>
     <div class="nums"><span><b>${d}</b> of ${n} in the basket</span><span class="${l.budget&&t>l.budget?'over':''}">${t?'<b>'+money(t)+'</b>':''}${l.budget?(t?' of ':'Budget ')+money(l.budget):''}</span></div></div>
   ${n&&d===n?`<div class="allset"><div>Everything's in the basket.</div><button class="btn sm" data-act="finish">See report</button></div>`:''}
-  ${!n?`<div class="empty" style="margin-top:16px">This list is empty. Add items below. Paste several at once, one per line or separated by commas.</div>`:''}
+  ${!n?`<div class="empty" style="margin-top:16px">This list is empty. Add items below, separated by commas.<div style="margin-top:12px"><button class="btn sm" data-act="bulkAdd">Paste a list</button></div></div>`:''}
   ${groupItems(todo).map(([c,its])=>`<div class="group"><h3><span>${c}</span><span>${its.length}</span></h3><div class="items">${its.map(rowList).join('')}</div></div>`).join('')}
   ${got.length?`<div class="group"><h3><span>In the basket</span><span>${got.length}</span></h3><div class="items">${got.map(rowList).join('')}</div></div>`:''}`;
 }
@@ -331,7 +340,7 @@ function tplView(){
   ${t.items.length?groupItems(t.items).map(([c,its])=>`<div class="group"><h3><span>${c}</span><span>${its.length}</span></h3><div class="items">${its.map(i=>`<div class="item">
       <button class="itext pad" data-act="editItem" data-id="${i.id}"><span class="iname">${esc(i.name)}</span>${i.qty?`<span class="iqty">${esc(i.qty)}</span>`:''}</button>
       <button class="icon" data-act="rmTplItem" data-id="${i.id}" aria-label="Remove ${esc(i.name)}">${ICON.x}</button></div>`).join('')}</div></div>`).join('')
-    :`<div class="empty" style="margin-top:16px">Add the things you buy every time. Each new list starts with these.</div>`}`;
+    :`<div class="empty" style="margin-top:16px">Add the things you buy every time. Each new list starts with these.<div style="margin-top:12px"><button class="btn sm" data-act="bulkAdd">Paste a list</button></div></div>`}`;
 }
 function receiptLines(l){
   const got=l.items.filter(i=>i.done),miss=l.items.filter(i=>!i.done),t=total(l);
@@ -435,9 +444,10 @@ function renderDock(){
   const l=view.s==='list'?L(view.id):null;
   const hasTpl=l&&l.templateId&&T(l.templateId);
   const html=`<div class="dock-in"><form class="addrow" data-form="add" autocomplete="off">
-      <input id="addInput" list="sugg" placeholder="Add item, e.g. 2 kg rice" aria-label="Add item" enterkeyhint="done">
+      <input id="addInput" list="sugg" placeholder="Add items, e.g. rice, eggs, milk" aria-label="Add items, separated by commas" enterkeyhint="done">
+      <button class="btn icon2" type="button" data-act="bulkAdd" aria-label="Add several items" title="Add several items">${ICON.lines}</button>
       <button class="btn primary" type="submit">Add</button></form>
-      <div class="hint"><span>Tip: paste a list, one item per line or separated by commas</span>${hasTpl?`<label><input type="checkbox" id="addTpl" ${addToTpl?'checked':''}> Also add to template</label>`:''}</div></div>`;
+      <div class="hint"><span>Separate items with commas, or tap ${'<b style="font-weight:700">☰</b>'} to paste a list</span>${hasTpl?`<label><input type="checkbox" id="addTpl" ${addToTpl?'checked':''}> Also add to template</label>`:''}</div></div>`;
   if(!d){d=document.createElement('div');d.className='dock';d.id='dock';document.body.appendChild(d);d.innerHTML=html;return}
   const val=$('#addInput')?$('#addInput').value:'';
   const sig=view.s+view.id+!!hasTpl;
@@ -453,7 +463,7 @@ function fillSugg(){
 }
 
 /* ---------- sheet + toast ---------- */
-function sheet(html){closeSheet();const w=document.createElement('div');w.className='sheet-wrap';w.id='sheet';
+function sheet(html){closeSheet();{const t=$('.toast');if(t)t.remove()}const w=document.createElement('div');w.className='sheet-wrap';w.id='sheet';
   w.innerHTML=`<div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div>`;
   w.addEventListener('click',e=>{if(e.target===w)closeSheet()});document.body.appendChild(w);
   const f=w.querySelector('input:not([type=radio]):not([type=checkbox]),textarea');if(f&&!('ontouchstart' in window))f.focus();}
@@ -466,8 +476,36 @@ function toast(msg,undo){const old=$('.toast');if(old)old.remove();clearTimeout(
   document.body.appendChild(t);toastT=setTimeout(()=>t.remove(),undo?5000:2600);}
 
 /* ---------- actions ---------- */
+function addEntries(entries,bulk){
+  let added=0,back=0,msgs=[];const seen=new Set();
+  entries=entries.filter(e=>{const k=e.name.toLowerCase();if(seen.has(k)){msgs.push(`${e.name} was listed twice`);return false}seen.add(k);return true});
+  if(view.s==='list'){
+    const l=L(view.id);const t=addToTpl&&l.templateId&&T(l.templateId);
+    for(const e of entries){
+      const ex=l.items.find(i=>i.name.toLowerCase()===e.name.toLowerCase());
+      if(ex){if(ex.done){ex.done=false;back++;msgs.push(`${ex.name} is back on the list`)}else msgs.push(`${ex.name} is already on the list`);continue}
+      l.items.push({...item(e.name,e.qty),done:false,price:null});added++;
+      if(t&&!t.items.some(i=>i.name.toLowerCase()===e.name.toLowerCase()))t.items.push(item(e.name,e.qty));
+    }
+  }else{
+    const t=T(view.id);
+    for(const e of entries){if(t.items.some(i=>i.name.toLowerCase()===e.name.toLowerCase())){msgs.push(`${e.name} is already in the template`);continue}t.items.push(item(e.name,e.qty));added++}
+  }
+  commit();
+  if(msgs.length)toast(msgs.length===1&&!added?msgs[0]:`Added ${added} item${added===1?'':'s'}${msgs.length?`, ${msgs.length} already there`:''}`);
+  else if(added>1||bulk)toast(`Added ${added} item${added===1?'':'s'}`);
+}
+function bulkPreview(){
+  const ta=$('#bulkTxt');if(!ta)return;const ents=parseEntries(ta.value);
+  const have=new Set((view.s==='list'?L(view.id).items.filter(i=>!i.done):T(view.id).items).map(i=>i.name.toLowerCase()));
+  const seen=new Set();let n=0;
+  $('#bulkChips').innerHTML=ents.map(e=>{const k=e.name.toLowerCase();const dup=have.has(k)||seen.has(k);seen.add(k);if(!dup)n++;
+    return `<span class="chip ${dup?'dup':''}" title="${dup?'Already there':''}">${esc(e.name)}${e.qty?`<small>${esc(e.qty)}</small>`:''}</span>`}).join('');
+  const b=$('#bulkGo');b.disabled=!n;b.textContent=n?`Add ${n} item${n>1?'s':''}`:'Add items';
+  $('#bulkCount').textContent=ents.length?`${n} new${ents.length-n?`, ${ents.length-n} already there`:''}`:'';
+}
 function parseEntries(text){
-  return text.split(/\n|,|;/).map(s=>s.replace(/^[-*•\s\[\]x✓]+/i,'').trim()).filter(Boolean).map(s=>{
+  return text.split(/\n|,|;/).map(s=>s.trim().replace(/^(?:(?:[-*•✓☐☑▪◦]|\[[ x✓]?\]|\d{1,3}[.)](?=\s))\s*)+/i,'').trim()).filter(Boolean).map(s=>{
     const m=s.match(/^((?:\d+(?:[.\/]\d+)?|½|¼|¾)\s*(?:kg|g|grams?|l|liters?|ml|pcs?|pieces?|dozen|doz|packs?|bundles?|cans?|bottles?|trays?|bunch(?:es)?|boxes?|bags?|sachets?|x)?\.?)\s+(.+)$/i);
     if(m)return {qty:m[1].trim(),name:cap(m[2].trim())};
     const t=s.match(/^(.+?)\s+((?:x\s*\d+)|(?:\d+(?:\.\d+)?\s*(?:x|pcs?|packs?|kg|g|l|ml|cans?|bottles?|boxes?)\.?))$/i);
@@ -520,6 +558,17 @@ const ACT={
     try{const data=d.fmt==='png'?await reportPng(l):d.fmt==='csv'?'\ufeff'+reportCsv(l):reportText(l);
       await sendFile(base+'.'+d.fmt,data,'Report: '+l.name);if(!NATIVE)toast('Report downloaded')}
     catch(e){sendErr(e,'save the report')}},
+  bulkAdd(){const isList=view.s==='list';const l=isList?L(view.id):null;const hasTpl=l&&l.templateId&&T(l.templateId);
+    const pre=$('#addInput')?$('#addInput').value:'';if($('#addInput'))$('#addInput').value='';
+    sheet(`<h3>Add several items</h3><form data-form="bulk">
+      <div class="field"><label for="bulkTxt">One item per line, or separated by commas</label>
+      <textarea id="bulkTxt" style="height:170px" placeholder="2 kg rice&#10;Eggs 1 tray&#10;Milk, bread, coffee&#10;Cookies 5x">${esc(pre)}</textarea></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="flabel" id="bulkCount"></span>
+      <label class="btn sm ghost" style="cursor:pointer">From text file<input type="file" id="bulkFile" accept=".txt,.csv,.md,text/plain" hidden></label></div>
+      <div class="chips" id="bulkChips"></div>
+      ${hasTpl?`<label class="pick" style="border:0;padding-top:0"><input type="checkbox" id="bulkTpl" ${addToTpl?'checked':''}><span style="font-weight:500">Also add to “${esc(T(l.templateId).name)}” template</span></label>`:''}
+      <button class="btn primary block" type="submit" id="bulkGo" disabled>Add items</button></form>`);
+    bulkPreview();if(pre)$('#bulkTxt').focus()},
   shareSheet(d){const pre=d&&d.pre;const act=state.lists.filter(l=>l.status==='active');
     const row=(k,id,name,meta,on)=>`<label class="pick"><input type="checkbox" data-k="${k}" value="${id}" ${on?'checked':''}><span>${esc(name)} <small>${meta}</small></span></label>`;
     if(!act.length&&!state.templates.length){toast('Nothing to share yet');return}
@@ -613,23 +662,10 @@ const FORM={
   add(){
     const inp=$('#addInput');const entries=parseEntries(inp.value);if(!entries.length)return;
     addToTpl=!!($('#addTpl')&&$('#addTpl').checked);
-    let added=0,msgs=[];
-    if(view.s==='list'){
-      const l=L(view.id);const t=addToTpl&&l.templateId&&T(l.templateId);
-      for(const e of entries){
-        const ex=l.items.find(i=>i.name.toLowerCase()===e.name.toLowerCase());
-        if(ex){if(ex.done){ex.done=false;msgs.push(`${ex.name} is back on the list`)}else msgs.push(`${ex.name} is already on the list`);continue}
-        l.items.push({...item(e.name,e.qty),done:false,price:null});added++;
-        if(t&&!t.items.some(i=>i.name.toLowerCase()===e.name.toLowerCase()))t.items.push(item(e.name,e.qty));
-      }
-    }else{
-      const t=T(view.id);
-      for(const e of entries){if(t.items.some(i=>i.name.toLowerCase()===e.name.toLowerCase())){msgs.push(`${e.name} is already in the template`);continue}t.items.push(item(e.name,e.qty));added++}
-    }
-    inp.value='';commit();$('#addInput')&&$('#addInput').focus();
-    if(msgs.length)toast(msgs.length===1?msgs[0]:`${added} added, ${msgs.length} already there`);
-    else if(added>1)toast(`Added ${added} items`);
+    addEntries(entries);inp.value='';$('#addInput')&&$('#addInput').focus();
   },
+  bulk(){const entries=parseEntries($('#bulkTxt').value);if(!entries.length){toast('Type or paste at least one item');return}
+    if($('#bulkTpl'))addToTpl=$('#bulkTpl').checked;closeSheet();addEntries(entries,true)},
   item(f){saveItemForm(f.dataset.id,false)},
   create(f){const name=$('#newName').value.trim();if(!name)return;const kind=f.querySelector('input[name=kind]:checked').value;
     const seen=new Set(),ents=parseEntries($('#newItems').value).filter(e=>{const k=e.name.toLowerCase();if(seen.has(k))return false;seen.add(k);return true});closeSheet();
@@ -643,11 +679,12 @@ const FORM={
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;e.preventDefault();const f=ACT[el.dataset.act];if(f)f(el.dataset,el)});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const fn=FORM[f.dataset.form];if(fn)fn(f)});
 document.addEventListener('change',e=>{if(e.target.id==='addTpl')addToTpl=e.target.checked;
+  if(e.target.id==='bulkFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const ta=$('#bulkTxt');if(!ta)return;ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();bulkPreview()}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='impFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const p=parseShare(txt);if(p)openImport(p);else toast('That isn’t a Weekly Basket file. For a plain list, paste it into Items.')}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='newFile'&&e.target.files[0]){const file=e.target.files[0];file.text().then(txt=>{const sp=parseShare(txt);if(sp){openImport(sp);return}const ta=$('#newItems');if(!ta)return;
     ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();ta.dispatchEvent(new Event('input',{bubbles:true}));
     const nm=$('#newName');if(nm&&!nm.value.trim())nm.value=cap(file.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim())}).catch(()=>toast('Couldn’t read that file'))}});
-document.addEventListener('input',e=>{if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
+document.addEventListener('input',e=>{if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 document.addEventListener('paste',e=>{if(e.target.id!=='addInput')return;const t=(e.clipboardData||{}).getData?e.clipboardData.getData('text'):'';
   if(t&&/[\n,;]/.test(t)){e.preventDefault();e.target.value=t;FORM.add()}});
