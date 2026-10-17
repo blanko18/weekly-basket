@@ -324,7 +324,7 @@ async function getOcr(progress){
     if(!window.Tesseract)await loadScript(local?'vendor/tesseract/tesseract.min.js':OCR_CDN+'tesseract.min.js');
     const opts=local?{workerPath:abs('vendor/tesseract/worker.min.js'),corePath:abs('vendor/tesseract/core/'),langPath:abs('vendor/tesseract/lang/'),workerBlobURL:false}
       :{workerPath:OCR_CDN+'worker.min.js',corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.0/',langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/'};
-    opts.cacheMethod='none';opts.gzip=true;
+    opts.cacheMethod='none';opts.gzip=!local;
     opts.logger=m=>{if(progress&&m&&typeof m.progress==='number')progress(m.status,m.progress)};
     const w=await window.Tesseract.createWorker('eng',1,opts);
     await w.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});

@@ -86,6 +86,21 @@ jobs:
           "$BT/apksigner" verify --print-certs WeeklyBasket.apk | head -3
           rm -f release.jks
 
+      - name: Check APK contents
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          z = zipfile.ZipFile('WeeklyBasket.apk'); n = set(z.namelist())
+          need = ['assets/public/index.html', 'assets/public/vendor/tesseract/worker.min.js',
+                  'assets/public/vendor/tesseract/tesseract.min.js', 'assets/public/vendor/tesseract/lang/eng.traineddata']
+          missing = [f for f in need if f not in n]
+          cores = [f for f in n if f.startswith('assets/public/vendor/tesseract/core/') and f.endswith('lstm.wasm.js')]
+          plugins = z.read('assets/capacitor.plugins.json').decode()
+          if missing or not cores or 'speech-recognition' not in plugins:
+              raise SystemExit(f'APK is missing files: {missing} cores={cores} speech={"speech-recognition" in plugins}')
+          print('APK contents OK:', len(cores), 'OCR cores, speech plugin registered')
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: WeeklyBasket-apk

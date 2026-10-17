@@ -3,6 +3,7 @@
 //  - adds the Capacitor runtime + Share/Filesystem/App plugin scripts (no bundler needed)
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
 const root = join(dirname(new URL(import.meta.url).pathname), '..');
 const nm = join(root, 'node_modules');
@@ -43,7 +44,8 @@ for (const f of readdirSync(coreDir)) {
   if (/^tesseract-core.*lstm\.wasm(\.js)?$/.test(f)) { copyFileSync(join(coreDir, f), join(tdir, 'core', f)); cores++; }
 }
 if (!cores) throw new Error('No tesseract LSTM core files found in ' + coreDir);
-copyFileSync(join(nm, '@tesseract.js-data', 'eng', '4.0.0_best_int', 'eng.traineddata.gz'), join(tdir, 'lang', 'eng.traineddata.gz'));
+// Stored uncompressed: Android's packager silently un-gzips and renames .gz assets, which would break the path.
+writeFileSync(join(tdir, 'lang', 'eng.traineddata'), gunzipSync(readFileSync(join(nm, '@tesseract.js-data', 'eng', '4.0.0_best_int', 'eng.traineddata.gz'))));
 console.log('receipt reader bundled:', cores, 'core files');
 
 // Fonts
