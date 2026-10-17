@@ -393,6 +393,22 @@ function matchReceipt(found,listItems){
   for(const [s,fi,id] of pairs){if(taken.has(fi)||used.has(id))continue;out[fi].match=id;taken.add(fi);used.add(id)}
   return out;
 }
+function rowsText(data){
+  /* Tesseract often reads names and prices as separate columns; rebuild receipt rows from line positions */
+  const segs=[];
+  for(const b of (data&&data.blocks)||[])for(const p of b.paragraphs||[])for(const l of p.lines||[]){
+    const t=(l.text||'').trim();if(t&&l.bbox)segs.push({t,x0:l.bbox.x0,x1:l.bbox.x1,y0:l.bbox.y0,y1:l.bbox.y1})}
+  if(!segs.length)return (data&&data.text)||'';
+  segs.sort((a,b)=>(a.y0+a.y1)-(b.y0+b.y1));
+  const rows=[];
+  for(const s of segs){const h=s.y1-s.y0;let best=null,bo=0;
+    for(const r of rows){const ov=Math.min(s.y1,r.y1)-Math.max(s.y0,r.y0);const rel=ov/Math.max(1,Math.min(h,r.y1-r.y0));
+      if(rel>bo&&!r.segs.some(q=>q.x0<s.x1&&s.x0<q.x1)){bo=rel;best=r}}
+    if(best&&bo>=0.45){best.segs.push(s);best.y0=Math.min(best.y0,s.y0);best.y1=Math.max(best.y1,s.y1)}
+    else rows.push({y0:s.y0,y1:s.y1,segs:[s]})}
+  rows.sort((a,b)=>a.y0-b.y0);
+  return rows.map(r=>r.segs.sort((a,b)=>a.x0-b.x0).map(q=>q.t).join('   ')).join('\n');
+}
 let scanState=null;
 function scanSheet(){
   sheet(`<h3>Scan a receipt</h3><p style="margin:0 0 14px;color:var(--muted);font-size:.92rem">Take a clear, straight photo of the receipt in good light. Prices are read on your phone and matched to this list. You can check everything before it’s applied.</p>
@@ -407,9 +423,9 @@ async function runScan(file){
     const canvas=await prepImage(file);
     set('Loading text reader (first time takes a few seconds)',.05);
     const w=await getOcr((st,p)=>{if(/recogniz/i.test(st))set('Reading text',.15+p*.85);else if(/load|init/i.test(st))set('Loading text reader',.05+p*.1)});
-    const {data}=await w.recognize(canvas);
-    const r=parseReceipt(data.text||'');
-    scanState={listId:l.id,rows:matchReceipt(r.items,l.items),total:r.total,text:data.text||''};
+    const {data}=await w.recognize(canvas,{},{text:true,blocks:true});
+    const text=rowsText(data);const r=parseReceipt(text);
+    scanState={listId:l.id,rows:matchReceipt(r.items,l.items),total:r.total,text};
     reviewSheet();
   }catch(e){
     console.error(e);
@@ -451,7 +467,8 @@ function applyScan(){
   scanState=null;closeSheet();commit();toast(`Updated ${m} item${m===1?'':'s'}${a?`, added ${a}`:''} from the receipt`);
 }
 window.__wbParseReceipt=parseReceipt;window.__wbSpeechToText=speechToText;window.__wbMatchReceipt=matchReceipt;
-window.__wbOcrSelfTest=async(canvas)=>{const w=await getOcr();const {data}=await w.recognize(canvas);return {text:data.text,parsed:parseReceipt(data.text)}};
+window.__wbRowsText=rowsText;
+window.__wbOcrSelfTest=async(canvas)=>{const w=await getOcr();const {data}=await w.recognize(canvas,{},{text:true,blocks:true});const text=rowsText(data);return {text,parsed:parseReceipt(text)}};
 
 function item(name,qty,extra){return Object.assign({id:uid(),name,qty:qty||'',cat:guessCat(name)},extra||{})}
 function fromTemplate(tpl){

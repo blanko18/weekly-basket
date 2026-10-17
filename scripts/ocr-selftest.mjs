@@ -39,10 +39,17 @@ try {
     lines.forEach((l, i) => x.fillText(l, 40, 35 + i * 44));
     const t0 = performance.now();
     const r = await window.__wbOcrSelfTest(c);
-    return { ...r, ms: Math.round(performance.now() - t0) };
+    const ms = Math.round(performance.now() - t0);
+    // extra, non-blocking: same receipt photographed slightly tilted
+    const k = document.createElement('canvas'); k.width = c.width + 60; k.height = c.height + 60;
+    const y = k.getContext('2d'); y.fillStyle = '#fff'; y.fillRect(0, 0, k.width, k.height);
+    y.translate(k.width / 2, k.height / 2); y.rotate(2 * Math.PI / 180); y.drawImage(c, -c.width / 2, -c.height / 2);
+    const tilted = await window.__wbOcrSelfTest(k);
+    return { ...r, ms, tilted: tilted.parsed };
   });
   console.log('--- OCR text ---\n' + result.text + '\n--- parsed ---');
   console.log(JSON.stringify(result.parsed, null, 1), '\n', result.ms, 'ms');
+  annotate('notice', 'Receipt reader tilted photo', JSON.stringify(result.tilted));
   summary = `${result.ms} ms\nTEXT:\n${result.text}\nPARSED: ${JSON.stringify(result.parsed)}`;
   const names = result.parsed.items.map(i => i.name.toLowerCase()).join(' | ');
   const ok = result.parsed.items.length >= 4 && /cheese whiz/.test(names) && result.parsed.total === 446;
