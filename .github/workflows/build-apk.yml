@@ -39,10 +39,29 @@ jobs:
       - name: Build web app
         run: npm run www
 
+      - name: Test receipt reader (offline OCR)
+        run: npm run test:ocr
+
       - name: Create Android project
         run: |
           npx cap add android
           npx capacitor-assets generate --android
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          add = ''
+          if 'RECORD_AUDIO' not in s:
+              add += '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n'
+          if 'android.speech.RecognitionService' not in s:
+              add += ('    <queries>\n'
+                      '        <intent><action android:name="android.speech.RecognitionService" /></intent>\n'
+                      '        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>\n'
+                      '        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>\n'
+                      '    </queries>\n')
+          s = s.replace('</manifest>', add + '</manifest>')
+          open(p, 'w').write(s)
+          print(s)
+          PY
           npx cap sync android
 
       - name: Set version

@@ -142,6 +142,21 @@ h2.eyebrow{font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:
 .chip{font-size:.85rem;padding:5px 10px;border-radius:99px;background:var(--accent-soft);color:var(--ink)}
 .chip small{color:var(--muted);margin-left:4px}
 .chip.dup{background:transparent;border:1px dashed var(--line);color:var(--muted);text-decoration:line-through}
+.tools{display:flex;gap:8px;margin-top:10px}
+.tools .btn{flex:1;background:transparent;gap:8px}
+.tools svg{width:18px;height:18px}
+.top .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:359px){.addrow .btn.icon2{width:42px}.addrow .btn.primary{padding-inline:12px}.addrow{gap:6px}}
+.srow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)}
+.srow.off .srow-main{opacity:.45}
+.srow-on{padding-top:12px}.srow-on input{width:20px;height:20px;accent-color:var(--accent)}
+.srow-main{flex:1;min-width:0;display:grid;gap:6px}
+.srow input.srow-name,.srow select,.srow input.srow-price{height:40px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);padding:0 10px;font-size:15px;width:100%;min-width:0}
+.srow-sub{display:grid;grid-template-columns:1fr 92px;gap:6px}
+.srow input.srow-price{font-family:var(--mono);text-align:right}
+#bulkMic.live{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+#bulkMic.live svg{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.18)}}
 .pick{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line);cursor:pointer}
 .pick input{width:20px;height:20px;accent-color:var(--accent);flex:none}
 .pick span{flex:1;min-width:0;font-weight:600}
@@ -192,6 +207,8 @@ const ICON={
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  mic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
+  camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
   lines:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3.5" cy="6" r="1" fill="currentColor"/><circle cx="3.5" cy="12" r="1" fill="currentColor"/><circle cx="3.5" cy="18" r="1" fill="currentColor"/></svg>',
   share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6"/></svg>',
   receipt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
@@ -225,6 +242,216 @@ function sendErr(e,what){if(isCancel(e))return;const c=e&&e.code;
   if(c==='rate_limited'){toast('Finish the open save prompt first');return}
   if(['unavailable','not_granted','capability_disabled','capability_removed'].includes(c)){dl=null;render()}
   toast(`Couldn’t ${what} here`)}
+
+/* ---------- voice input (no API key: Android speech service / browser Web Speech) ---------- */
+let voiceOK=null, voiceBusy=false, webRec=null;
+const SRWeb=window.SpeechRecognition||window.webkitSpeechRecognition;
+async function voiceInit(){
+  try{
+    if(NATIVE){const SR=NP('SpeechRecognition');voiceOK=!!(SR&&(await SR.available()).available)}
+    else voiceOK=!!SRWeb;
+  }catch(e){voiceOK=false}
+  if(view.s==='list'||view.s==='tpl'){const d=$('#dock');if(d)d.dataset.sig='';renderDock()}
+}
+const NUMW={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,isa:1,dalawa:2,tatlo:3,apat:4,lima:5,anim:6,pito:7,walo:8,siyam:9,sampu:10,a:1,an:1};
+function speechToText(raw){
+  let s=' '+String(raw||'').toLowerCase().replace(/[.!?]/g,' ')+' ';
+  s=s.replace(/\s(?:comma|next|then|plus|saka|tapos)\s/g,' , ').replace(/\s(?:and|at|tsaka|pati)\s/g,' , ');
+  s=s.replace(/\bhalf\s+(?:a\s+)?(kilo|kg)\b/g,'½ kg').replace(/\ba\s+dozen\b/g,'1 dozen');
+  s=s.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g,w=>NUMW[w])
+     .replace(/\b(isa|dalawa|tatlo|apat|lima|anim|pito|walo|siyam|sampu)(?:ng)?\b/g,(m,w)=>NUMW[w]);
+  s=s.replace(/\b(\d+(?:\.\d+)?)\s*(?:kilos?|kilograms?|keys)\b/g,'$1 kg').replace(/\b(\d+(?:\.\d+)?)\s*grams?\b/g,'$1 g')
+     .replace(/\b(\d+(?:\.\d+)?)\s*(?:liters?|litres?)\b/g,'$1 l').replace(/\b(\d+)\s*pieces?\b/g,'$1 pcs');
+  const known=knownNames();
+  return s.split(',').map(x=>x.replace(/^\s*(?:a|an|some|ng|ang)\s+/,'').trim()).filter(Boolean).flatMap(c=>splitKnown(c,known)).join('\n');
+}
+function knownNames(){const n=new Set();
+  state.templates.forEach(t=>t.items.forEach(i=>n.add(i.name.toLowerCase())));state.lists.forEach(l=>l.items.forEach(i=>n.add(i.name.toLowerCase())));
+  Object.keys(state.prices||{}).forEach(k=>n.add(k));return n}
+function splitKnown(chunk,known){
+  /* "rice eggs coffee" -> rice / eggs / coffee, but only when every word belongs to a known item name */
+  if(/\d/.test(chunk))return [chunk];const w=chunk.split(/\s+/);if(w.length<2)return [chunk];
+  const out=[];let i=0;
+  while(i<w.length){let hit=0;for(let j=w.length;j>i;j--){if(known.has(w.slice(i,j).join(' '))){hit=j;break}}
+    if(!hit)return [chunk];out.push(w.slice(i,hit).join(' '));i=hit}
+  return out.length>1?out:[chunk];
+}
+function voiceAppend(text){
+  const items=speechToText(text);if(!items)return;
+  const ta=$('#bulkTxt');if(!ta)return;
+  ta.value=(ta.value.trim()?ta.value.replace(/\s+$/,'')+'\n':'')+items;bulkPreview();
+}
+function voiceUI(on,msg){voiceBusy=on;const b=$('#bulkMic');if(b){b.classList.toggle('live',on);b.querySelector('span').textContent=on?'Listening…':'Speak items'}
+  const h=$('#bulkHeard');if(h)h.textContent=msg||''}
+async function voiceStart(){
+  if(voiceBusy){if(webRec)try{webRec.stop()}catch(e){}return}
+  if(NATIVE){
+    const SR=NP('SpeechRecognition');
+    try{
+      let p=await SR.checkPermissions();
+      if(p.speechRecognition!=='granted')p=await SR.requestPermissions();
+      if(p.speechRecognition!=='granted'){toast('Allow the microphone to add items by voice');return}
+      voiceUI(true,'');
+      const r=await SR.start({language:'en-PH',maxResults:1,popup:true,partialResults:false,prompt:'Say items, e.g. "rice, eggs and two kilos pork"'});
+      voiceUI(false,'');
+      const said=(r&&r.matches&&r.matches[0])||'';
+      if(said){voiceAppend(said);$('#bulkHeard').textContent='Heard: “'+said+'”'}else toast('Didn’t catch that, try again');
+    }catch(e){voiceUI(false,'');if(!isCancel(e)&&!/no match|didn.t understand|no speech/i.test(String(e&&e.message||e)))toast('Voice input isn’t available right now');}
+    return;
+  }
+  if(!SRWeb){toast('Voice input isn’t supported here');return}
+  webRec=new SRWeb();webRec.lang='en-PH';webRec.interimResults=true;webRec.continuous=false;webRec.maxAlternatives=1;
+  let finalText='';
+  webRec.onresult=ev=>{let interim='';for(let i=ev.resultIndex;i<ev.results.length;i++){const t=ev.results[i][0].transcript;if(ev.results[i].isFinal)finalText+=t+' ';else interim+=t}
+    voiceUI(true,interim?'“'+interim+'”':'')};
+  webRec.onerror=ev=>{voiceUI(false,'');webRec=null;
+    if(ev.error==='not-allowed'||ev.error==='service-not-allowed'){voiceOK=false;const d=$('#dock');if(d)d.dataset.sig='';renderDock();const m=$('#bulkMic');if(m)m.remove();
+      toast('The microphone isn’t available here. Voice works in the phone app.')}
+    else if(ev.error!=='no-speech'&&ev.error!=='aborted')toast('Voice input stopped ('+ev.error+')')};
+  webRec.onend=()=>{voiceUI(false,finalText?'Heard: “'+finalText.trim()+'”':'');if(finalText)voiceAppend(finalText);webRec=null};
+  try{webRec.start();voiceUI(true,'')}catch(e){voiceUI(false,'');toast('Voice input isn’t available here')}
+}
+
+/* ---------- receipt scanning (offline OCR with Tesseract, no API key) ---------- */
+const OCR_CDN='https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/';
+let ocrWorker=null, ocrLoading=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('load '+src));document.head.appendChild(s)})}
+async function getOcr(progress){
+  if(ocrWorker)return ocrWorker;
+  if(ocrLoading)return ocrLoading;
+  ocrLoading=(async()=>{
+    const local=!!window.WB_LOCAL_OCR;const abs=p=>new URL(p,location.href).href;
+    if(!window.Tesseract)await loadScript(local?'vendor/tesseract/tesseract.min.js':OCR_CDN+'tesseract.min.js');
+    const opts=local?{workerPath:abs('vendor/tesseract/worker.min.js'),corePath:abs('vendor/tesseract/core/'),langPath:abs('vendor/tesseract/lang/'),workerBlobURL:false}
+      :{workerPath:OCR_CDN+'worker.min.js',corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.0/',langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/'};
+    opts.cacheMethod='none';opts.gzip=true;
+    opts.logger=m=>{if(progress&&m&&typeof m.progress==='number')progress(m.status,m.progress)};
+    const w=await window.Tesseract.createWorker('eng',1,opts);
+    await w.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});
+    ocrWorker=w;return w;
+  })();
+  try{return await ocrLoading}catch(e){ocrLoading=null;throw e}
+}
+async function prepImage(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+    const long=Math.max(img.naturalWidth,img.naturalHeight),k=Math.min(1,2200/long)*(long<1000?1.6:1);
+    const w=Math.round(img.naturalWidth*k),h=Math.round(img.naturalHeight*k);
+    const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});
+    x.drawImage(img,0,0,w,h);
+    const d=x.getImageData(0,0,w,h),p=d.data;let lo=255,hi=0;const g=new Uint8ClampedArray(w*h);
+    for(let i=0,j=0;i<p.length;i+=4,j++){const v=(p[i]*299+p[i+1]*587+p[i+2]*114)/1000;g[j]=v}
+    const hist=new Uint32Array(256);for(const v of g)hist[v]++;let acc=0;const n=g.length;
+    for(let v=0;v<256;v++){acc+=hist[v];if(acc>n*0.02){lo=v;break}}acc=0;
+    for(let v=255;v>=0;v--){acc+=hist[v];if(acc>n*0.02){hi=v;break}}
+    const span=Math.max(1,hi-lo);
+    for(let i=0,j=0;i<p.length;i+=4,j++){const v=Math.max(0,Math.min(255,(g[j]-lo)*255/span));p[i]=p[i+1]=p[i+2]=v}
+    x.putImageData(d,0,0);return c;
+  }finally{URL.revokeObjectURL(url)}
+}
+const SKIP_RX=/\b(sub\s*-?\s*total|total|amount\s*due|amt\s*due|cash|change|tender|vat|vatable|non-?vat|zero\s*rated|exempt|discount|disc\b|less|senior|sc\b|pwd|points?|balance|gcash|maya|paymaya|card|visa|master|debit|credit|qty|items?\s*purchased|no\.?\s*of\s*items|invoice|receipt|tin\b|min\b|s\/n|sn\b|pos\b|cashier|terminal|date|time|thank|ref|approval|auth|php\s*total|rounding|service\s*charge|tax)\b/i;
+function money_(s){const m=String(s).replace(/\s/g,'').replace(/[Oo]/g,'0').replace(/(\d),(\d{2})$/,'$1.$2').replace(/,/g,'');const v=parseFloat(m);return isFinite(v)?v:null}
+function cleanName(s){
+  s=s.replace(/^[\s*#.:\-]+/,'').replace(/^\d{5,}\s*/,'').replace(/\s+\d{6,}\b/g,'').replace(/[|_~=]+/g,' ').replace(/\s{2,}/g,' ').trim();
+  s=s.replace(/(?:\s+[xX]|\s*@)\s*$/,'').trim();
+  return s.toLowerCase().replace(/\b([a-z])/g,c=>c.toUpperCase()).replace(/\b(\d+)(G|Ml|Kg|L|Pcs)\b/g,(m,a,b)=>a+b.toLowerCase());
+}
+function parseReceipt(text){
+  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[“”"']/g,'').trim()).filter(Boolean);
+  const items=[];let total=null;
+  const PRICE=/(?:^|\s)(-?[\dOo]{1,3}(?:[,\s][\dOo]{3})*[.,]\s?[\dOo]{2})\s*[A-Z*#]{0,2}\s*$/;
+  const QTY=/^\s*(\d+(?:\.\d+)?)\s*(?:@|x|X|pcs?\s*@|PC\s*@)\s*(\d+[.,]\d{2})\s+(\d+[.,]\d{2})/;
+  for(const raw of lines){
+    const line=raw.replace(/\s+/g,' ');
+    const q=line.match(QTY);
+    if(q){const last=items[items.length-1];const tot=money_(q[3]);
+      if(last&&!last.qtyLine){last.price=tot;last.qty=q[1];last.qtyLine=true}continue}
+    const m=line.match(PRICE);if(!m)continue;
+    if(!/\d/.test(m[1]))continue;const price=money_(m[1]);if(price==null)continue;
+    const before=line.slice(0,m.index).trim();
+    if(/\btotal\b|amount\s*due|amt\s*due/i.test(before)&&!/sub\s*-?\s*total/i.test(before)){if(price>0)total=price;continue}
+    if(SKIP_RX.test(before))continue;
+    if(price<=0||price>100000)continue;
+    const name=cleanName(before);
+    if((name.match(/[a-z]/gi)||[]).length<2)continue;
+    items.push({name,price,qty:''});
+  }
+  return {items:items.map(({name,price,qty})=>({name,price,qty})),total};
+}
+const toks=s=>String(s).toLowerCase().replace(/[^a-z0-9ñ ]+/g,' ').split(/\s+/).filter(t=>t.length>=2);
+function matchScore(itemName,rec){
+  const it=toks(itemName),rt=toks(rec);if(!it.length||!rt.length)return 0;let hit=0;
+  const sub=(r,t)=>{if(r[0]!==t[0])return false;let k=0;for(const ch of t){if(ch===r[k])k++;if(k===r.length)return true}return false};
+  for(const t of it){const pre=t.slice(0,Math.min(4,t.length));if(rt.some(r=>r.startsWith(pre)||(r.length>=3&&(t.startsWith(r)||sub(r,t)))))hit++}
+  return hit/it.length;
+}
+function matchReceipt(found,listItems){
+  const used=new Set();
+  const pairs=[];found.forEach((f,fi)=>listItems.forEach(it=>{const s=matchScore(it.name,f.name);if(s>=0.5)pairs.push([s,fi,it.id])}));
+  pairs.sort((a,b)=>b[0]-a[0]);const out=found.map(f=>({...f,match:'new',on:true}));const taken=new Set();
+  for(const [s,fi,id] of pairs){if(taken.has(fi)||used.has(id))continue;out[fi].match=id;taken.add(fi);used.add(id)}
+  return out;
+}
+let scanState=null;
+function scanSheet(){
+  sheet(`<h3>Scan a receipt</h3><p style="margin:0 0 14px;color:var(--muted);font-size:.92rem">Take a clear, straight photo of the receipt in good light. Prices are read on your phone and matched to this list. You can check everything before it’s applied.</p>
+    <div class="actions"><label class="btn primary block" style="cursor:pointer">Take photo<input type="file" id="scanCam" accept="image/*" capture="environment" hidden></label>
+    <label class="btn block" style="cursor:pointer">Choose a photo<input type="file" id="scanPick" accept="image/*" hidden></label></div>`);
+}
+async function runScan(file){
+  const l=L(view.id);if(!l||!file)return;
+  sheet(`<h3>Reading receipt…</h3><div class="bar" style="margin:6px 0 10px"><i id="scanBar" style="width:2%"></i></div><p class="flabel" id="scanMsg" style="margin:0">Preparing photo</p>`);
+  const set=(msg,p)=>{const b=$('#scanBar'),m=$('#scanMsg');if(b)b.style.width=Math.max(2,Math.round(p*100))+'%';if(m)m.textContent=msg};
+  try{
+    const canvas=await prepImage(file);
+    set('Loading text reader (first time takes a few seconds)',.05);
+    const w=await getOcr((st,p)=>{if(/recogniz/i.test(st))set('Reading text',.15+p*.85);else if(/load|init/i.test(st))set('Loading text reader',.05+p*.1)});
+    const {data}=await w.recognize(canvas);
+    const r=parseReceipt(data.text||'');
+    scanState={listId:l.id,rows:matchReceipt(r.items,l.items),total:r.total,text:data.text||''};
+    reviewSheet();
+  }catch(e){
+    console.error(e);
+    sheet(`<h3>Couldn’t read the receipt</h3><p style="margin:0 0 14px;color:var(--muted)">${NATIVE||window.WB_LOCAL_OCR?'Something went wrong while reading the photo. Try again with a sharper photo.':'Receipt scanning couldn’t start here. It works in the Weekly Basket phone app, which reads receipts offline.'}</p>
+      <div class="actions"><button class="btn primary block" data-act="scanReceipt">Try again</button><button class="btn ghost block" data-act="closeSheet">Close</button></div>`);
+  }
+}
+function reviewSheet(){
+  const st=scanState;const l=L(st.listId);if(!l){closeSheet();return}
+  const opts=sel=>`<option value="new" ${sel==='new'?'selected':''}>Add as new item</option>`+l.items.map(i=>`<option value="${i.id}" ${sel===i.id?'selected':''}>${esc(i.name)}${i.done?' ✓':''}</option>`).join('');
+  const sum=st.rows.filter(r=>r.on).reduce((s,r)=>s+(r.price||0),0);
+  const matched=st.rows.filter(r=>r.on&&r.match!=='new').length,added=st.rows.filter(r=>r.on&&r.match==='new').length;
+  sheet(`<h3>Check what was found</h3>
+    ${st.rows.length?`<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">${st.rows.length} line${st.rows.length>1?'s':''} found · ${money2(sum)}${st.total?` · receipt total ${money2(st.total)}`:''}${st.total&&Math.abs(st.total-sum)>0.5?' <b style="color:var(--warn)">(check for missed lines)</b>':''}</p>
+    <div id="scanRows">${st.rows.map((r,i)=>`<div class="srow ${r.on?'':'off'}" data-i="${i}">
+      <label class="srow-on"><input type="checkbox" data-scan="on" ${r.on?'checked':''} aria-label="Use this line"></label>
+      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name on receipt">
+        <div class="srow-sub"><select data-scan="match" aria-label="Match to list item">${opts(r.match)}</select>
+        <input class="srow-price" data-scan="price" inputmode="decimal" value="${r.price!=null?r.price.toFixed(2):''}" aria-label="Price"></div></div></div>`).join('')}</div>
+    <div class="actions" style="margin-top:14px"><button class="btn primary block" data-act="applyScan" ${matched+added?'':'disabled'}>Apply${matched?` · ${matched} matched`:''}${added?` · ${added} new`:''}</button>`
+    :`<p style="margin:0 0 14px;color:var(--muted)">No item lines with prices were found. Try a straighter, closer photo with the whole receipt in view.</p><div class="actions">`}
+    <button class="btn block" data-act="scanReceipt">Scan another photo</button>
+    <details style="margin-top:6px"><summary class="flabel" style="cursor:pointer">Show scanned text</summary><textarea readonly style="width:100%;height:160px;margin-top:8px;font-family:var(--mono);font-size:.8rem;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);padding:8px">${esc(st.text)}</textarea></details></div>`);
+}
+function scanEdit(el){
+  const row=el.closest('.srow');if(!row||!scanState)return;const r=scanState.rows[+row.dataset.i];const k=el.dataset.scan;
+  if(k==='on'){r.on=el.checked;reviewSheet();return}
+  if(k==='name')r.name=el.value;
+  if(k==='price')r.price=num(el.value);
+  if(k==='match'){r.match=el.value;reviewSheet()}
+}
+function applyScan(){
+  const st=scanState;const l=st&&L(st.listId);if(!l)return;let m=0,a=0;
+  for(const r of st.rows){if(!r.on)continue;
+    if(r.match!=='new'){const it=l.items.find(i=>i.id===r.match);if(!it)continue;if(r.price)it.price=r.price;it.done=true;if(r.price)state.prices[it.name.toLowerCase()]=r.price;m++}
+    else{const name=(r.name||'').trim();if(!name)continue;const ex=l.items.find(i=>i.name.toLowerCase()===name.toLowerCase());
+      if(ex){if(r.price)ex.price=r.price;ex.done=true;m++;continue}
+      l.items.push({...item(name,''),done:true,price:r.price||null});if(r.price)state.prices[name.toLowerCase()]=r.price;a++}}
+  scanState=null;closeSheet();commit();toast(`Updated ${m} item${m===1?'':'s'}${a?`, added ${a}`:''} from the receipt`);
+}
+window.__wbParseReceipt=parseReceipt;window.__wbSpeechToText=speechToText;window.__wbMatchReceipt=matchReceipt;
+window.__wbOcrSelfTest=async(canvas)=>{const w=await getOcr();const {data}=await w.recognize(canvas);return {text:data.text,parsed:parseReceipt(data.text)}};
 
 function item(name,qty,extra){return Object.assign({id:uid(),name,qty:qty||'',cat:guessCat(name)},extra||{})}
 function fromTemplate(tpl){
@@ -320,11 +547,11 @@ function listView(){
   const todo=l.items.filter(i=>!i.done),got=l.items.filter(i=>i.done);
   return `<header class="top"><button class="icon" data-act="home" aria-label="Back to lists">${ICON.back}</button>
     <div class="ttl"><h1>${esc(l.name)}</h1><div class="sub">${dShort(l.createdAt)}</div></div>
-    <button class="icon" data-act="report" data-id="${l.id}" aria-label="Report so far" title="Report so far" ${n?'':'disabled'}>${ICON.receipt}</button>
-    <button class="btn sm ${n&&d===n?'primary':''}" data-act="finish" ${n?'':'disabled'}>Finish</button>
+        <button class="btn sm ${n&&d===n?'primary':''}" data-act="finish" ${n?'':'disabled'}>Finish</button>
     <button class="icon" data-act="listMenu" aria-label="List options">${ICON.more}</button></header>
   <div class="prog"><div class="bar"><i style="width:${n?d/n*100:0}%"></i></div>
     <div class="nums"><span><b>${d}</b> of ${n} in the basket</span><span class="${l.budget&&t>l.budget?'over':''}">${t?'<b>'+money(t)+'</b>':''}${l.budget?(t?' of ':'Budget ')+money(l.budget):''}</span></div></div>
+  ${n?`<div class="tools"><button class="btn sm" data-act="scanReceipt">${ICON.camera}Scan receipt</button><button class="btn sm" data-act="report" data-id="${l.id}">${ICON.receipt}Report</button></div>`:''}
   ${n&&d===n?`<div class="allset"><div>Everything's in the basket.</div><button class="btn sm" data-act="finish">See report</button></div>`:''}
   ${!n?`<div class="empty" style="margin-top:16px">This list is empty. Add items below, separated by commas.<div style="margin-top:12px"><button class="btn sm" data-act="bulkAdd">Paste a list</button></div></div>`:''}
   ${groupItems(todo).map(([c,its])=>`<div class="group"><h3><span>${c}</span><span>${its.length}</span></h3><div class="items">${its.map(rowList).join('')}</div></div>`).join('')}
@@ -369,6 +596,7 @@ function reportView(){
   </div>
   <div class="actions" style="margin-top:18px">
     ${canSendFiles()?`<div class="two"><button class="btn primary" data-act="download">${NATIVE?'Save / share':'Download'}</button><button class="btn" data-act="copy">Copy</button></div>`:`<button class="btn primary block" data-act="copy">Copy report</button>`}
+    <button class="btn block" data-act="scanReceipt">${ICON.camera} Scan receipt for prices</button>
     ${live?`<div class="two"><button class="btn" data-act="open" data-id="${l.id}">Back to list</button><button class="btn" data-act="finish">Finish shopping</button></div>`:`${miss.length&&!l.carried?`<button class="btn block" data-act="carry">Carry ${miss.length} missed item${miss.length>1?'s':''} to ${tpl?'next week':'a new list'}</button>`:''}
     ${l.carried?`<div class="meta" style="text-align:center;color:var(--muted);font-size:.9rem">Missed items were carried over.</div>`:''}
     <div class="two"><button class="btn" data-act="reopen">Reopen list</button><button class="btn danger" data-act="delList">Delete</button></div>`}
@@ -445,12 +673,13 @@ function renderDock(){
   const hasTpl=l&&l.templateId&&T(l.templateId);
   const html=`<div class="dock-in"><form class="addrow" data-form="add" autocomplete="off">
       <input id="addInput" list="sugg" placeholder="Add items, e.g. rice, eggs, milk" aria-label="Add items, separated by commas" enterkeyhint="done">
+      ${voiceOK?`<button class="btn icon2" type="button" data-act="voice" aria-label="Add items by voice" title="Add by voice">${ICON.mic}</button>`:''}
       <button class="btn icon2" type="button" data-act="bulkAdd" aria-label="Add several items" title="Add several items">${ICON.lines}</button>
       <button class="btn primary" type="submit">Add</button></form>
       <div class="hint"><span>Separate items with commas, or tap ${'<b style="font-weight:700">☰</b>'} to paste a list</span>${hasTpl?`<label><input type="checkbox" id="addTpl" ${addToTpl?'checked':''}> Also add to template</label>`:''}</div></div>`;
   if(!d){d=document.createElement('div');d.className='dock';d.id='dock';document.body.appendChild(d);d.innerHTML=html;return}
   const val=$('#addInput')?$('#addInput').value:'';
-  const sig=view.s+view.id+!!hasTpl;
+  const sig=view.s+view.id+!!hasTpl+voiceOK;
   if(d.dataset.sig!==sig){d.innerHTML=html;d.dataset.sig=sig}
   else if($('#addInput'))$('#addInput').value=val;
 }
@@ -565,10 +794,15 @@ const ACT={
       <textarea id="bulkTxt" style="height:170px" placeholder="2 kg rice&#10;Eggs 1 tray&#10;Milk, bread, coffee&#10;Cookies 5x">${esc(pre)}</textarea></div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="flabel" id="bulkCount"></span>
       <label class="btn sm ghost" style="cursor:pointer">From text file<input type="file" id="bulkFile" accept=".txt,.csv,.md,text/plain" hidden></label></div>
+      ${voiceOK?`<button type="button" class="btn block" id="bulkMic" data-act="voiceGo" style="margin-top:4px">${ICON.mic}<span>Speak items</span></button><p class="flabel" id="bulkHeard" style="margin:6px 0 0;min-height:1em"></p>`:''}
       <div class="chips" id="bulkChips"></div>
       ${hasTpl?`<label class="pick" style="border:0;padding-top:0"><input type="checkbox" id="bulkTpl" ${addToTpl?'checked':''}><span style="font-weight:500">Also add to “${esc(T(l.templateId).name)}” template</span></label>`:''}
       <button class="btn primary block" type="submit" id="bulkGo" disabled>Add items</button></form>`);
     bulkPreview();if(pre)$('#bulkTxt').focus()},
+  voice(){ACT.bulkAdd();setTimeout(voiceStart,NATIVE?50:150)},
+  voiceGo(){voiceStart()},
+  scanReceipt(){scanSheet()},
+  applyScan(){applyScan()},
   shareSheet(d){const pre=d&&d.pre;const act=state.lists.filter(l=>l.status==='active');
     const row=(k,id,name,meta,on)=>`<label class="pick"><input type="checkbox" data-k="${k}" value="${id}" ${on?'checked':''}><span>${esc(name)} <small>${meta}</small></span></label>`;
     if(!act.length&&!state.templates.length){toast('Nothing to share yet');return}
@@ -632,6 +866,7 @@ const ACT={
       <button class="btn primary block" type="submit">Save</button></form>
       <div class="sep"></div><div class="actions">
       ${t?`<button class="btn block" data-act="updateTpl">Update “${esc(t.name)}” template to match this list</button>`:`<button class="btn block" data-act="saveAsTpl">Save as a template</button>`}
+      <button class="btn block" data-act="scanReceipt">Scan a receipt to fill in prices</button>
       <button class="btn block" data-act="shareSheet" data-pre="${l.id}">Share this list</button>
       <button class="btn block" data-act="uncheckAll">Uncheck everything</button>
       <button class="btn danger block" data-act="delList">Delete list</button></div>`)},
@@ -679,12 +914,14 @@ const FORM={
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;e.preventDefault();const f=ACT[el.dataset.act];if(f)f(el.dataset,el)});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const fn=FORM[f.dataset.form];if(fn)fn(f)});
 document.addEventListener('change',e=>{if(e.target.id==='addTpl')addToTpl=e.target.checked;
+  if((e.target.id==='scanCam'||e.target.id==='scanPick')&&e.target.files[0]){runScan(e.target.files[0]);return}
+  if(e.target.dataset&&e.target.dataset.scan&&e.target.dataset.scan!=='name'&&e.target.dataset.scan!=='price'){scanEdit(e.target);return}
   if(e.target.id==='bulkFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const ta=$('#bulkTxt');if(!ta)return;ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();bulkPreview()}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='impFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const p=parseShare(txt);if(p)openImport(p);else toast('That isn’t a Weekly Basket file. For a plain list, paste it into Items.')}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='newFile'&&e.target.files[0]){const file=e.target.files[0];file.text().then(txt=>{const sp=parseShare(txt);if(sp){openImport(sp);return}const ta=$('#newItems');if(!ta)return;
     ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();ta.dispatchEvent(new Event('input',{bubbles:true}));
     const nm=$('#newName');if(nm&&!nm.value.trim())nm.value=cap(file.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim())}).catch(()=>toast('Couldn’t read that file'))}});
-document.addEventListener('input',e=>{if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
+document.addEventListener('input',e=>{if(e.target.dataset&&(e.target.dataset.scan==='name'||e.target.dataset.scan==='price'))scanEdit(e.target);if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 document.addEventListener('paste',e=>{if(e.target.id!=='addInput')return;const t=(e.clipboardData||{}).getData?e.clipboardData.getData('text'):'';
   if(t&&/[\n,;]/.test(t)){e.preventDefault();e.target.value=t;FORM.add()}});
@@ -692,7 +929,7 @@ document.addEventListener('paste',e=>{if(e.target.id!=='addInput')return;const t
 /* ---------- boot ---------- */
 state=loadLocal()||sample();
 state.prices=state.prices||{};
-render();runAuto();
+render();runAuto();voiceInit();
 async function pull(){
   if(!ref||saveTimer)return;
   try{const snap=await ref.get();if(snap.exists){const r=snap.data().state;if(r&&(r.updatedAt||0)>(state.updatedAt||0)){state=JSON.parse(JSON.stringify(r));state.prices=state.prices||{};saveLocal();render();runAuto()}}

@@ -1,7 +1,7 @@
 // Builds www/ for the Android app from src/app.html:
 //  - swaps Google Fonts for bundled font files, so the app looks right offline
 //  - adds the Capacitor runtime + Share/Filesystem/App plugin scripts (no bundler needed)
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const root = join(dirname(new URL(import.meta.url).pathname), '..');
@@ -30,6 +30,22 @@ for (const [pkg, out] of pkgs) {
   scripts.push(`<script src="vendor/${out}"></script>`);
 }
 
+// Offline receipt reader (Tesseract): script, worker, LSTM cores and English data
+const tdir = join(www, 'vendor', 'tesseract');
+mkdirSync(join(tdir, 'core'), { recursive: true });
+mkdirSync(join(tdir, 'lang'), { recursive: true });
+copyFileSync(join(nm, 'tesseract.js', 'dist', 'tesseract.min.js'), join(tdir, 'tesseract.min.js'));
+copyFileSync(join(nm, 'tesseract.js', 'dist', 'worker.min.js'), join(tdir, 'worker.min.js'));
+const coreDir = [join(nm, 'tesseract.js-core'), join(nm, 'tesseract.js', 'node_modules', 'tesseract.js-core')].find(existsSync);
+if (!coreDir) throw new Error('tesseract.js-core is not installed');
+let cores = 0;
+for (const f of readdirSync(coreDir)) {
+  if (/^tesseract-core.*lstm\.wasm(\.js)?$/.test(f)) { copyFileSync(join(coreDir, f), join(tdir, 'core', f)); cores++; }
+}
+if (!cores) throw new Error('No tesseract LSTM core files found in ' + coreDir);
+copyFileSync(join(nm, '@tesseract.js-data', 'eng', '4.0.0_best_int', 'eng.traineddata.gz'), join(tdir, 'lang', 'eng.traineddata.gz'));
+console.log('receipt reader bundled:', cores, 'core files');
+
 // Fonts
 const fonts = [
   ['Figtree', 'figtree', 'figtree', [400, 500, 600, 700]],
@@ -55,6 +71,6 @@ html = html
   .replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>/, '<link rel="stylesheet" href="fonts/fonts.css">');
 const i = html.indexOf('<script>');
 if (i < 0) throw new Error('app script not found in src/app.html');
-html = html.slice(0, i) + scripts.join('\n') + '\n' + html.slice(i);
+html = html.slice(0, i) + '<script>window.WB_LOCAL_OCR=true</script>\n' + scripts.join('\n') + '\n' + html.slice(i);
 writeFileSync(join(www, 'index.html'), html);
 console.log('www ready:', scripts.length, 'runtime scripts,', css.split('\n').filter(Boolean).length, 'font files');
