@@ -1,0 +1,25 @@
+name: Export receipt reader files (dev)
+
+on:
+  push:
+    branches: [ocr-lab]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run www
+      - name: Push the bundled reader to the ocr-vendor branch
+        run: |
+          mkdir out && cp -r www/vendor/tesseract out/
+          cd out && git init -q && git checkout -q -b ocr-vendor
+          git add -A && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "tesseract bundle for local testing"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ocr-vendor
