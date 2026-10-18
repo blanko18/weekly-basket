@@ -59,6 +59,13 @@ try {
   for (const it of real.parsed.items) { const k = left.findIndex(t => it.price != null && Math.abs(t - it.price) < 0.005); if (k >= 0) { left.splice(k, 1); hit++; } }
   annotate('notice', `Real receipt: ${real.parsed.items.length} items, ${hit}/12 prices exact`, real.text + '\n' + JSON.stringify(real.parsed.items));
   if (real.parsed.items.length < 11 || hit < 8) throw new Error(`Real receipt regression: ${real.parsed.items.length} items, ${hit}/12 prices`);
+  // same photo with the built-in inventory: names and prices should all come out right
+  const inv = await page.evaluate(async () => { const b = await (await fetch('/fixtures/receipt-sm-1.jpg')).blob(); return window.__wbScanLab(b); });
+  const left2 = [...truth]; let hit2 = 0;
+  for (const it of inv.rows) { const k = left2.findIndex(t => it.price != null && Math.abs(t - it.price) < 0.005); if (k >= 0) { left2.splice(k, 1); hit2++; } }
+  const named = inv.rows.filter(r => r.learned).length;
+  annotate('notice', `With inventory: ${inv.rows.length} items - ${named} named - ${hit2} of 12 prices`, inv.rows.map(r => `${r.name} | ${r.qty} | ${r.price} | ${r.priceNote || ''} [${r.raw}]`).join('\n'));
+  if (named < 11 || hit2 < 11) throw new Error(`Inventory matching regression: ${named} named, ${hit2}/12 prices`);
   const names = result.parsed.items.map(i => i.name.toLowerCase()).join(' | ');
   const ok = result.parsed.items.length >= 4 && /cheese whiz/.test(names) && result.parsed.total === 446;
   if (!ok) throw new Error('Receipt reader self-test did not find the expected items/total');

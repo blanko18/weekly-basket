@@ -7,6 +7,8 @@ The same Weekly Basket app as the Claude version, packaged as an installable And
 - **Import**: + New → **Import shared file**. A plain text list can be pasted into the **Items** box instead.
 - Reports can be saved or shared as a picture, text or spreadsheet.
 - **Voice add**: tap the mic in the add bar and say items ("rice, eggs and two kilos pork"). Uses Android's built-in speech recognition, no API key.
+- **Inventory**: your products with how they're printed on receipts and their last prices (home screen, *Products & receipt codes*). Ships with 40 products from an SM receipt; names you fix while scanning are added automatically. The receipt reader matches each line against it, fills unreadable prices and fixes one-digit misreads.
+- **Basic template**: ships with the same 40 products.
 - **Scan a receipt**: in a list, tap *Scan receipt*, take a photo, review the matches, and prices are filled in and items checked off. Text is read on the phone with Tesseract (bundled, offline, no API key). The build runs `npm run test:ocr` to check the reader before every APK.
 - It does not sync with the Claude-hosted version. To move your lists over, use Share → *Send as Weekly Basket file* in the Claude version, then import that file in the app.
 

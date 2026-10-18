@@ -367,7 +367,7 @@ async function prepImage(file,o){
     x.putImageData(d,0,0);return c;
   }finally{URL.revokeObjectURL(url)}
 }
-const SKIP_RX=/\b(sub\s*-?\s*total|total|amount\s*due|amt\s*due|cash|change|tendered|amt\s*tender|cash\s*tender|vat|vatable|non-?vat|zero\s*rated|vat\s*exempt|exempt\s*sales|discount|sc\s*disc|pwd|points?|balance|gcash|maya|paymaya|credit\s*card|debit|card\s*payment|items?\s*purchased|no\.?\s*of\s*items|rounding|service\s*charge|php)\b/i;
+const SKIP_RX=/(\w?iscount\b|\w?ubtota\w?\b)|\b(sub\s*-?\s*total|total|amount\s*due|amt\s*due|cash|change|tendered|amt\s*tender|cash\s*tender|vat|vatable|non-?vat|zero\s*rated|vat\s*exempt|exempt\s*sales|discount|sc\s*disc|pwd|points?|balance|gcash|maya|paymaya|credit\s*card|debit|card\s*payment|items?\s*purchased|no\.?\s*of\s*items|rounding|service\s*charge|php)\b/i;
 /* header/footer words: only used to drop lines that have no price */
 const WEAK_RX=/\b(invoice|receipt|tin|min|s\/n|sn|pos|cashier|terminal|date|time|thank|ref|approval|auth|address|tel|telephone|branch|store|member|customer|official|accreditation|permit|serial|machine|visa|master|card|qty|senior|less)\b/i;
 function money_(s){const m=String(s).replace(/\s/g,'').replace(/[Oo]/g,'0').replace(/(\d),(\d{2})$/,'$1.$2').replace(/,/g,'');const v=parseFloat(m);return isFinite(v)?v:null}
@@ -533,8 +533,8 @@ async function runScan(file){
     const canvas=await prepImage(file);
     set('Loading text reader (first time takes a few seconds)',.05);
     const w=await getOcr((st,p)=>{if(/recogniz/i.test(st))set('Reading text',.15+p*.85);else if(/load|init/i.test(st))set('Loading text reader',.05+p*.1)});
-    const {data}=await w.recognize(canvas,{},{text:true,blocks:true});
-    finishScan(rowsText(data),target,false);
+    const text=await readCanvas(w,canvas,()=>set('Photo looks sideways, trying it rotated',.9));
+    finishScan(text,target,false);
   }catch(e){
     console.error(e);
     sheet(`<h3>Couldn’t read the receipt</h3><p style="margin:0 0 14px;color:var(--muted)">${NATIVE||window.WB_LOCAL_OCR?'Something went wrong while reading the photo. Try again with a sharper photo.':'Receipt scanning couldn’t start here. It works in the Weekly Basket phone app, which reads receipts offline.'}</p>
@@ -543,7 +543,7 @@ async function runScan(file){
 }
 function finishScan(text,target,paste){
   const r=parseReceipt(text,{paste});
-  const found=r.items.map(it=>{const a=learnedName(it.name,it.price);return {...it,raw:it.name,name:a?a.name:it.name,learned:!!a}});
+  const found=mapFound(r.items,paste);
   const isNew=target.kind==='newList'||target.kind==='newTpl';
   scanState={target,rows:matchReceipt(found,targetItems(target)),total:r.total,text,
     name:'Receipt '+new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'}),
@@ -551,21 +551,157 @@ function finishScan(text,target,paste){
   scanState.rows.forEach(x=>{x.shown=x.name;if(isNew)x.match='new'});
   reviewSheet();
 }
+function mapFound(items,paste){
+  return items.map(it=>{const e=paste?null:invFind(it.name,it.price,it.qty);const o={...it,raw:it.name};
+    if(paste){const e2=(state.catalog||[]).find(x=>x.name.toLowerCase()===it.name.toLowerCase());if(e2)o.cat=e2.cat;return o}
+    if(!e)return o;o.name=e.name;o.cat=e.cat;o.learned=true;o.invId=e.id;if(e._byPrice){delete e._byPrice;o.priceNote='matched by price, check the name'}
+    const guess=()=>/kg/i.test(e.qty||'')?(e.total||null):(o.qty&&e.price?Math.round(e.price*countOf(o.qty)*100)/100:(e.total||e.price));
+    if(o.price==null){o.price=guess();if(o.price)o.priceNote='last price from inventory'}
+    else if(e.total&&!o.qty&&(o.price>e.total*3||o.price<e.total/3)){o.priceNote=`read as ${o.price.toFixed(2)}, using inventory price`;o.price=guess()}
+    else if(e.total&&Math.abs(o.price-e.total)>0.011&&(oneDigitOff(o.price,e.total)||(e.price&&oneDigitOff(o.price,e.price*countOf(o.qty))))){
+      o.priceNote=`read as ${o.price.toFixed(2)}, corrected from inventory`;o.price=oneDigitOff(o.price,e.total)?e.total:e.price*countOf(o.qty)}
+    return o});
+}
 /* ---- names learned from your corrections: "Coou Ambp Tt" -> "CDO Ulam Burger Patties" ---- */
 const normK=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return m||n;let prev=Array.from({length:n+1},(_,j)=>j);
   for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur}return prev[n]}
-function learnedName(raw,price){
-  const k=normK(raw);if(k.length<3)return null;let best=null,bs=0;
-  for(const a of state.aliases||[]){const r=1-lev(k,a.k)/Math.max(k.length,a.k.length);const need=(price&&a.price&&Math.abs(price-a.price)<0.01)?0.55:0.72;
-    if(r>=need&&r>bs){bs=r;best=a}}
-  return best;
+/* ---------- built-in inventory: SM receipt, 40 lines, subtotal ₱4,157.35 ----------
+   [receipt code as printed, readable name, aisle, unit price, usual qty ('' | '2x' | '0.53 kg'), line total] */
+const SEED_CATALOG_V=1;
+const SEED_CATALOG=[
+ ['PF TJ Hotdog 1kg','Purefoods Tender Juicy Hotdog 1kg','Frozen',189.00,'',189.00],
+ ['CDOUlamBPttiesRg','CDO Ulam Burger Patties Regular','Frozen',71.50,'',71.50],
+ ['SMB C Roast Pork','Roast Pork (per kg)','Meat & fish',369.00,'0.53 kg',195.57],
+ ['MAG ChckenQtrCut','Magnolia Chicken Quarter Cut (per kg)','Meat & fish',268.00,'0.775 kg',207.70],
+ ['FBrT300Shts12S','Bathroom Tissue 300 Sheets 12s','Household',112.75,'2x',225.50],
+ ['ZnrxCSB1smFsh900','Zonrox Color Safe Bleach Blossom Fresh 900ml','Household',73.75,'',73.75],
+ ['LACTACDBwshMlky150','Lactacyd Baby Wash Milky 150ml','Household',256.75,'',256.75],
+ ['SILKABWASHREF500','Silka Body Wash Refill 500ml','Household',219.75,'',219.75],
+ ['DentalBBasicJrS2s','Dental-B Basic Junior Toothbrush 2s','Household',47.75,'2x',95.50],
+ ['CharmPLBrthUns20','Charm Pantyliner Breathable Unscented 20s','Household',31.00,'',31.00],
+ ['SAEMIN RomaineLt','Romaine Lettuce (per kg)','Produce',749.00,'0.17 kg',127.33],
+ ['ArgntinaBefLf150','Argentina Beef Loaf 150g','Pantry',22.00,'',22.00],
+ ['SMBONUS DST500ML','SM Bonus Distilled Water 500ml','Drinks',8.50,'',8.50],
+ ['SM BONUS DWATER','SM Bonus Drinking Water','Drinks',6.50,'',6.50],
+ ['NES Yog Straw110','Nestlé Yogurt Strawberry 110g','Dairy & eggs',54.00,'4x',216.00],
+ ['AMarkBlkGranlx12','A-Mark Black Granules 1x12','Pantry',11.50,'',11.50],
+ ['MC Taco Mix 40g','McCormick Taco Mix 40g','Pantry',54.50,'',54.50],
+ ['FrescaTnaAfrtada','Fresca Tuna Afritada','Pantry',28.50,'',28.50],
+ ['FrescaTnaCldreta','Fresca Tuna Caldereta','Pantry',28.50,'',28.50],
+ ['UFC Banana 320g','UFC Banana Catsup 320g','Pantry',29.50,'',29.50],
+ ['AG BbqHickorySce','American Garden BBQ Hickory Sauce','Pantry',189.50,'',189.50],
+ ['SMB Honey 455g','SM Bonus Honey 455g','Pantry',180.00,'',180.00],
+ ['NissinSpicyChx52','Nissin Spicy Chicken Noodles 52g','Pantry',23.00,'',23.00],
+ ['Slecta SberyMlk','Selecta Strawberry Milk','Dairy & eggs',34.50,'2x',69.00],
+ ['SOYFRSHSOYAMLK1L','Soyfresh Soya Milk 1L','Dairy & eggs',87.50,'',87.50],
+ ['ArlaGStrwberry1L','Arla Goodness Strawberry Milk 1L','Dairy & eggs',149.50,'',149.50],
+ ['LM Mac&Cheese75g','Lucky Me Mac & Cheese 75g','Pantry',24.25,'3x',72.75],
+ ['GTasteGrnule80g','Great Taste Granules 80g','Pantry',106.50,'2x',213.00],
+ ['STIK-O STRW 380G','Stick-O Strawberry 380g','Pantry',99.50,'',99.50],
+ ['QChow Mami 55g','Quick Chow Mami 55g','Pantry',7.75,'3x',23.25],
+ ['KopikoBlack40g5s','Kopiko Black Coffee 40g 5s','Pantry',70.00,'',70.00],
+ ['M UbeSpcl Piyaya','Ube Special Piyaya','Bakery',116.50,'',116.50],
+ ['JJ Berry Knots 25g',"Jack 'n Jill Berry Knots 25g",'Pantry',9.50,'',9.50],
+ ['RicheeseStrwbChsck','Richeese Strawberry Cheesecake','Pantry',12.50,'2x',25.00],
+ ['MentosPfreshPmnt35','Mentos Pure Fresh Peppermint 35','Pantry',64.00,'2x',128.00],
+ ['HappySwtChli100g','Happy Sweet Chili 100g','Pantry',34.50,'',34.50],
+ ['CrelacBnanaSbery','Cerelac Banana Strawberry','Pantry',129.50,'2x',259.00],
+ ['JJ Dynamite 50s',"Jack 'n Jill Dynamite 50s",'Pantry',49.50,'',49.50],
+ ['FROOTYTWNPOP20S','Frooty Twin Pop 20s','Frozen',32.50,'2x',65.00],
+ ['BongbongsBscochoB',"Bongbong's Biscocho",'Bakery',194.50,'',194.50]
+];
+/* ---------- inventory: your products, their receipt codes and last prices; the receipt reader matches against it ---------- */
+function invKeys(e){return [...(e.codes||[]),normK(e.name)].filter(k=>k&&k.length>=3)}
+function ratio(a,b){return 1-lev(a,b)/Math.max(a.length,b.length)}
+const countOf=q=>{const m=String(q||'').match(/^(\d+)\s*x$/i);return m?+m[1]:1};
+function priceFits(e,price,qty){if(!price)return false;const n=countOf(qty);
+  return [e.total,e.price,e.price&&e.price*n].some(v=>v&&Math.abs(v-price)<0.011)}
+function lcs(a,b){let best=0;const m=new Array(b.length+1).fill(0);for(let i=1;i<=a.length;i++){let prev=0;for(let j=1;j<=b.length;j++){const t=m[j];m[j]=a[i-1]===b[j-1]?prev+1:0;if(m[j]>best)best=m[j];prev=t}}return best}
+function invFind(raw,price,qty){
+  const k=normK(raw);if(k.length<3)return null;const cat=state.catalog||[];
+  const scored=cat.map(e=>{let r=0,sub=0;
+    for(const key of invKeys(e)){r=Math.max(r,ratio(k,key),k.length>key.length?ratio(k.slice(0,key.length+1),key):0);
+      if(key.length>=6&&k.length>=6&&(k.includes(key)||key.includes(k)))r=Math.max(r,0.86);sub=Math.max(sub,lcs(k,key))}
+    return {e,r,sub,fit:priceFits(e,price,qty)}});
+  let best=null,bs=0;
+  for(const x of scored){const need=x.fit?0.5:0.66;if(x.r>=need&&x.r+(x.fit?0.1:0)>bs){bs=x.r+(x.fit?0.1:0);best=x.e}}
+  if(best)return best;
+  /* a distinctive word only one product has ("hotdog", "dynamite") */
+  const bySub=scored.slice().sort((a,b)=>b.sub-a.sub);
+  if(bySub[0]&&bySub[0].sub>=6&&(!bySub[1]||bySub[1].sub<=bySub[0].sub-3))return bySub[0].e;
+  /* unreadable name but a price only one product has */
+  if(price&&(raw.match(/[a-z]/gi)||[]).length>=2){const fits=scored.filter(x=>x.fit);if(fits.length===1){fits[0].e._byPrice=true;return fits[0].e}}
+  return null;
 }
-function learn(raw,name,price){
-  const k=normK(raw);if(k.length<3||!name)return;state.aliases=state.aliases||[];
-  const i=state.aliases.findIndex(a=>a.k===k);const e={k,name,price:price||null,t:Date.now()};
-  if(i>=0)state.aliases[i]=e;else state.aliases.push(e);
-  if(state.aliases.length>500)state.aliases.sort((a,b)=>b.t-a.t).length=500;
+/* one misread digit on a thermal receipt (1↔7, 5↔6, 3↔8 …) */
+const CONF=new Set(['17','71','56','65','38','83','08','80','68','86','06','60','14','41','35','53','29','92','89','98']);
+function oneDigitOff(a,b){const x=a.toFixed(2),y=b.toFixed(2);if(x.length!==y.length)return false;let d=0,ok=true;
+  for(let i=0;i<x.length;i++)if(x[i]!==y[i]){d++;if(!CONF.has(x[i]+y[i]))ok=false}return d===1&&ok}
+function learn(raw,name,price,cat,qty,invId){
+  if(!name)return;state.catalog=state.catalog||[];const k=normK(raw);
+  let e=state.catalog.find(x=>x.name.toLowerCase()===name.toLowerCase());
+  const byId=invId&&state.catalog.find(x=>x.id===invId);
+  if(byId&&!e){byId.name=name;e=byId}   /* you renamed a product the reader recognised: rename it in the inventory */
+  if(!e){e={id:uid(),name,code:raw&&k.length>=3?raw:'',codes:[],cat:cat||guessCat(name),price:null,total:null,qty:qty||''};state.catalog.push(e)}
+  if(k.length>=3&&!e.codes.includes(k)){e.codes.push(k);if(e.codes.length>12)e.codes.shift()}
+  if(price){e.total=price;const n=countOf(qty||e.qty);e.price=/kg/i.test(qty||e.qty||'')?e.price||null:Math.round(price/n*100)/100}
+  if(cat&&cat!=='Other')e.cat=cat;e.t=Date.now();
+}
+function mergeSeedCatalog(){
+  state.catalog=state.catalog||[];let added=0;
+  for(const [code,name,cat,unit,qty,total] of SEED_CATALOG){
+    const k=normK(code);let e=state.catalog.find(x=>x.codes&&x.codes.includes(k))||state.catalog.find(x=>x.name.toLowerCase()===name.toLowerCase());
+    if(e){if(!e.code)e.code=code;continue}
+    state.catalog.push({id:uid(),name,code,codes:[k],cat,price:unit,total,qty,t:0});added++}
+  /* names you taught the reader before the inventory existed */
+  for(const a of state.aliases||[]){const e=state.catalog.find(x=>x.name.toLowerCase()===a.name.toLowerCase())||invFind(a.name,a.price);
+    if(e){if(a.k&&!e.codes.includes(a.k))e.codes.push(a.k)}else learn(a.k,a.name,a.price)}
+  delete state.aliases;state.catalogV=SEED_CATALOG_V;return added;
+}
+function invView(){
+  const q=(view.q||'').toLowerCase();const all=(state.catalog||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));
+  return `<header class="top"><button class="icon" data-act="home" aria-label="Back">${ICON.back}</button>
+    <div class="ttl"><h1>Inventory</h1><div class="sub">${all.length} products · used to read receipts</div></div>
+    <button class="btn primary sm" data-act="invEdit" aria-label="Add a product">+</button></header>
+  <div class="field" style="margin-top:4px"><input id="invQ" placeholder="Search products or receipt codes" value="${esc(view.q||'')}" autocomplete="off"></div>
+  <div class="items" id="invList">${invRows(all,q)}</div>
+  <p class="flabel" style="margin:12px 4px">The receipt reader compares each line with these receipt codes and last prices. Names you fix on the review screen are added here automatically.</p>`;
+}
+function invRows(all,q){
+  const rows=all.filter(e=>!q||e.name.toLowerCase().includes(q)||(e.code||'').toLowerCase().includes(q)||(e.cat||'').toLowerCase().includes(q));
+  return rows.map(e=>`<button class="hist" data-act="invEdit" data-id="${e.id}"><div class="name">${esc(e.name)}<div class="meta" style="font-weight:400;color:var(--muted);font-size:.8rem;font-family:var(--mono)">${esc(e.code||'')}${e.code?' · ':''}<span style="font-family:var(--body)">${esc(e.cat||'')}</span></div></div><span class="amt">${e.price?money(e.price)+(/kg/i.test(e.qty||'')?'/kg':''):''}</span></button>`).join('')
+    ||`<div class="empty" style="margin:12px">No products match.</div>`;
+}
+function invEditSheet(id){
+  const e=(state.catalog||[]).find(x=>x.id===id)||{name:'',code:'',cat:'Other',price:null,qty:''};
+  sheet(`<h3>${id?'Edit product':'Add product'}</h3><form data-form="inv" data-id="${id||''}">
+    <div class="field"><label for="ivName">Name</label><input id="ivName" value="${esc(e.name)}" required placeholder="e.g. Zonrox Color Safe Bleach 900ml"></div>
+    <div class="field"><label for="ivCode">As printed on the receipt</label><input id="ivCode" value="${esc(e.code||'')}" placeholder="e.g. ZnrxCSB1smFsh900" style="font-family:var(--mono)"></div>
+    <div class="two"><div class="field"><label for="ivPrice">Last price (₱${/kg/i.test(e.qty||'')?' per kg':''})</label><input id="ivPrice" inputmode="decimal" value="${e.price??''}"></div>
+    <div class="field"><label for="ivQty">Usual quantity</label><input id="ivQty" value="${esc(e.qty||'')}" placeholder="e.g. 2x, 0.5 kg"></div></div>
+    <div class="field"><label for="ivCat">Aisle</label><select id="ivCat">${CATS.map(c=>`<option ${c===e.cat?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="actions"><button class="btn primary block" type="submit">Save</button>
+    ${id?`<button class="btn danger block" type="button" data-act="invDel" data-id="${id}">Delete product</button>`:''}</div></form>`);
+}
+function invSave(f){
+  const name=$('#ivName').value.trim();if(!name)return;const id=f.dataset.id;state.catalog=state.catalog||[];
+  let e=state.catalog.find(x=>x.id===id);if(!e){e={id:uid(),codes:[],t:Date.now()};state.catalog.push(e)}
+  const code=$('#ivCode').value.trim();const k=normK(code);
+  e.name=name;e.code=code;if(k.length>=3&&!(e.codes||[]).includes(k))e.codes=[k,...(e.codes||[])];
+  e.price=num($('#ivPrice').value);e.qty=$('#ivQty').value.trim();e.cat=$('#ivCat').value;
+  if(e.price&&!/kg/i.test(e.qty))e.total=Math.round(e.price*countOf(e.qty)*100)/100;
+  if(e.price)state.prices[name.toLowerCase()]=e.price;
+  closeSheet();commit();
+}
+/* rotate a canvas for sideways photos */
+function rotCanvas(c,deg){const r=document.createElement('canvas');const q=deg%180!==0;r.width=q?c.height:c.width;r.height=q?c.width:c.height;
+  const x=r.getContext('2d');x.translate(r.width/2,r.height/2);x.rotate(deg*Math.PI/180);x.drawImage(c,-c.width/2,-c.height/2);return r}
+async function readCanvas(w,canvas,progress){
+  let {data}=await w.recognize(canvas,{},{text:true,blocks:true});let text=rowsText(data);let n=parseReceipt(text).items.length;
+  if(n<3){for(const deg of [90,270]){progress&&progress(deg);const r=await w.recognize(rotCanvas(canvas,deg),{},{text:true,blocks:true});
+    const t=rowsText(r.data),m=parseReceipt(t).items.length;if(m>n){n=m;text=t}if(n>=3)break}}
+  return text;
 }
 function pasteSheet(){
   readScanTo();
@@ -591,7 +727,7 @@ function reviewSheet(){
     ${!isTpl?`<label class="pick" style="border:0;padding:2px 0 8px"><input type="checkbox" data-scan="bought" ${st.bought?'checked':''}><span style="font-weight:500">Already bought: check items off and save prices <small>(untick to add them as things to buy)</small></span></label>`:''}
     <div id="scanRows">${st.rows.map((r,i)=>`<div class="srow ${r.on?'':'off'}" data-i="${i}">
       <label class="srow-on"><input type="checkbox" data-scan="on" ${r.on?'checked':''} aria-label="Use this line"></label>
-      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name">${r.learned?`<span class="flabel" style="margin-top:-2px">✓ Name remembered from a past receipt</span>`:''}
+      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name">${r.learned||r.priceNote?`<span class="flabel" style="margin-top:-2px">${r.learned?'✓ Matched to your inventory':''}${r.learned&&r.priceNote?' · ':''}${r.priceNote?esc(r.priceNote):''}</span>`:''}
         <div class="srow-sub">${isNew?`<span class="flabel" style="align-self:center">${r.qty?'Qty '+esc(r.qty):'New item'}</span>`:`<select data-scan="match" aria-label="Match to an item">${opts(r.match)}</select>`}
         <input class="srow-price" data-scan="price" inputmode="decimal" value="${r.price!=null?r.price.toFixed(2):''}" aria-label="Price"></div></div></div>`).join('')}</div>
     <p class="flabel" style="margin:10px 0 0">Fix any name once and it’s remembered for next time.</p>
@@ -616,12 +752,12 @@ function applyScan(){
   const fresh=[];const byName={};
   for(const r of st.rows){if(!r.on||r.match!=='new')continue;const name=(r.name||'').trim();if(!name)continue;const k=name.toLowerCase();
     if(byName[k]){const f=byName[k];f.count++;f.price=(f.price||0)+(r.price||0)||null;f.qty=f.count+'x';continue}
-    byName[k]={name,price:r.price||null,qty:r.qty||'',count:1};fresh.push(byName[k])}
+    byName[k]={name,price:r.price||null,qty:r.qty||'',cat:r.cat||null,count:1};fresh.push(byName[k])}
   const remember=(n,p)=>{if(p)state.prices[n.toLowerCase()]=p};
   const tobj=targetObj(t);
   for(const r of st.rows){if(!r.on||!r.raw)continue;
     const fin=r.match!=='new'&&tobj?(tobj.items.find(i=>i.id===r.match)||{}).name:(r.name||'').trim();
-    if(fin&&(fin!==r.raw||r.learned))learn(r.raw,fin,r.price)}
+    if(fin)learn(r.raw,fin,r.price,r.cat,r.qty,r.match==='new'?r.invId:null)}
   let m=0,a=0,dest=null;
   if(t.kind==='newList'||t.kind==='list'){
     let l=t.kind==='list'?L(t.id):null;
@@ -630,14 +766,14 @@ function applyScan(){
       if(bought){if(r.price)it.price=r.price;it.done=true}remember(it.name,r.price);m++}
     for(const f of fresh){const ex=l.items.find(i=>i.name.toLowerCase()===f.name.toLowerCase());
       if(ex){if(f.price)ex.price=f.price;if(bought)ex.done=true;m++;continue}
-      l.items.push({...item(f.name,f.qty),done:bought,price:bought?f.price:null});remember(f.name,f.count>1?null:f.price);a++}
+      l.items.push({...item(f.name,f.qty),...(f.cat?{cat:f.cat}:{}),done:bought,price:bought?f.price:null});remember(f.name,f.count>1?null:f.price);a++}
     dest={s:'list',id:l.id};
   }else{
     let tp=t.kind==='tpl'?T(t.id):null;
     if(!tp){tp={id:uid(),name:(st.name||'Receipt').trim()||'Receipt',autoDay:null,budget:null,carry:[],items:[]};state.templates.push(tp)}
     for(const r of st.rows){if(!r.on||r.match==='new')continue;const it=tp.items.find(i=>i.id===r.match);if(it){remember(it.name,r.price);m++}}
     for(const f of fresh){if(tp.items.some(i=>i.name.toLowerCase()===f.name.toLowerCase())){m++;continue}
-      tp.items.push(item(f.name,f.qty));remember(f.name,f.count>1?null:f.price);a++}
+      tp.items.push({...item(f.name,f.qty),...(f.cat?{cat:f.cat}:{})});remember(f.name,f.count>1?null:f.price);a++}
     dest={s:'tpl',id:tp.id};
   }
   scanState=null;closeSheet();view=dest;commit();scrollTo(0,0);
@@ -645,11 +781,13 @@ function applyScan(){
 }
 window.__wbParseReceipt=parseReceipt;window.__wbSpeechToText=speechToText;window.__wbMatchReceipt=matchReceipt;
 window.__wbRowsText=rowsText;
+window.__wbScanLab=async(blob)=>{const c=await prepImage(blob);const w=await getOcr();const text=await readCanvas(w,c);const r=parseReceipt(text);return {text,total:r.total,rows:mapFound(r.items,false)}};
 window.__wbOcrLab=async(blob,o)=>{const c=await prepImage(blob,o);const w=await getOcr();await w.setParameters({tessedit_pageseg_mode:String(o.psm||4)});const {data}=await w.recognize(c,{},{text:true,blocks:true});const text=rowsText(data);return {text,raw:data.text,parsed:parseReceipt(text)}};
 window.__wbOcrImage=async(blob)=>{const c=await prepImage(blob);const w=await getOcr();const {data}=await w.recognize(c,{},{text:true,blocks:true});const text=rowsText(data);return {text,parsed:parseReceipt(text)}};
 window.__wbOcrSelfTest=async(canvas)=>{const w=await getOcr();const {data}=await w.recognize(canvas,{},{text:true,blocks:true});const text=rowsText(data);return {text,parsed:parseReceipt(text)}};
 
-function item(name,qty,extra){return Object.assign({id:uid(),name,qty:qty||'',cat:guessCat(name)},extra||{})}
+function item(name,qty,extra){const e=state&&(state.catalog||[]).find(x=>x.name.toLowerCase()===String(name).toLowerCase());
+  return Object.assign({id:uid(),name,qty:qty||'',cat:e&&e.cat||guessCat(name)},extra||{})}
 function fromTemplate(tpl){
   const carry=(tpl.carry||[]).filter(c=>!tpl.items.some(i=>i.name.toLowerCase()===c.name.toLowerCase()));
   const l={id:uid(),name:tpl.name,templateId:tpl.id,createdAt:Date.now(),status:'active',budget:tpl.budget||null,
@@ -699,7 +837,7 @@ function render(){
   if(view.s==='list'&&!L(view.id))view={s:'home'};
   if(view.s==='tpl'&&!T(view.id))view={s:'home'};
   if(view.s==='report'&&!L(view.id))view={s:'home'};
-  app.innerHTML=view.s==='list'?listView():view.s==='tpl'?tplView():view.s==='report'?reportView():homeView();
+  app.innerHTML=view.s==='list'?listView():view.s==='tpl'?tplView():view.s==='report'?reportView():view.s==='inv'?invView():homeView();
   renderDock();
   fillSugg();
   if(focused==='addInput'&&$('#addInput'))$('#addInput').focus();
@@ -723,6 +861,9 @@ function homeView(){
     <div class="meta">${t.items.length} items${t.autoDay!=null?' · new list every '+DAYS[t.autoDay]:''}${(t.carry||[]).length?' · '+t.carry.length+' carried over':''}</div></button>
     <button class="btn primary sm" data-act="start" data-id="${t.id}">Start list</button></div></div>`).join('')
     :`<div class="empty">Templates are lists you reuse. Make one for your weekly groceries and start a fresh copy each week.</div>`}</div>
+  <h2 class="eyebrow">Inventory</h2>
+  <button class="card" data-act="inventory"><div class="row"><span class="name">Products & receipt codes</span><span class="meta">${(state.catalog||[]).length}</span></div>
+    <div class="meta">Your products, their last prices and how they’re printed on receipts. The receipt reader uses this to name items and check prices.</div></button>
   ${done.length?`<h2 class="eyebrow">History</h2><div class="items">${done.map(l=>{const got=l.items.filter(i=>i.done).length;
     return `<button class="hist" data-act="report" data-id="${l.id}"><div class="name">${esc(l.name)}<div class="meta" style="font-weight:400;color:var(--muted);font-size:.85rem">${dShort(l.finishedAt)} · ${got}/${l.items.length} items</div></div><span class="amt">${total(l)?money(total(l)):''}</span></button>`}).join('')}</div>`:''}
   <p class="sync" id="sync">${cloud?'Saved to your account, so it follows you across devices.':'Saved in this browser.'}</p>`;
@@ -883,6 +1024,7 @@ function fillSugg(){
   const names=new Set();
   state.templates.forEach(t=>t.items.forEach(i=>names.add(i.name)));
   state.lists.forEach(l=>l.items.forEach(i=>names.add(i.name)));
+  (state.catalog||[]).forEach(e=>names.add(e.name));
   const html=[...names].sort().map(n=>`<option value="${esc(n)}">`).join('');
   const dl=$('#sugg');if(dl.innerHTML!==html)dl.innerHTML=html;
 }
@@ -1000,6 +1142,9 @@ const ACT={
   scanReceipt(){scanSheet(view.s==='list'?{kind:'list',id:view.id}:view.s==='tpl'?{kind:'tpl',id:view.id}:view.s==='report'?{kind:'list',id:view.id}:null)},
   scanAgain(){scanSheet(scanState?scanState.target:scanTarget)},
   pasteReceipt(){pasteSheet()},
+  inventory(){view={s:'inv',q:''};render();scrollTo(0,0)},
+  invEdit(d){invEditSheet(d.id)},
+  invDel(d){const e=state.catalog.find(x=>x.id===d.id);closeSheet();if(e)withUndo(`Deleted ${e.name}`,()=>{state.catalog=state.catalog.filter(x=>x.id!==d.id)})},
   pasteGo(){const t=$('#pasteTxt').value;if(!t.trim()){toast('Paste the receipt text first');return}finishScan(t,scanTarget||{kind:'newList'},true);
     if(!scanState.rows.length)toast('No lines with prices found in that text')},
   applyScan(){applyScan()},
@@ -1036,7 +1181,7 @@ const ACT={
         items:its.map((i,k)=>({...i,done:!!(raw[k]&&raw[k].done),price:num(raw[k]&&raw[k].price)}))});nl++}}
     pendingImport=null;closeSheet();view={s:'home'};commit();scrollTo(0,0);
     toast(`Imported ${[nt?nt+' template'+(nt>1?'s':''):'',nl?nl+' list'+(nl>1?'s':''):''].filter(Boolean).join(' and ')}`)},
-  editItem(d){const {it,l}=findItem(d.id);const isList=!!l;const last=state.prices[it.name.toLowerCase()];
+  editItem(d){const {it,l}=findItem(d.id);const isList=!!l;const last=state.prices[it.name.toLowerCase()]||((state.catalog||[]).find(x=>x.name.toLowerCase()===it.name.toLowerCase())||{}).price;
     sheet(`<h3>Edit item</h3><form data-form="item" data-id="${it.id}">
       <div class="field"><label for="fName">Name</label><input id="fName" value="${esc(it.name)}" required></div>
       <div class="two"><div class="field"><label for="fQty">Quantity</label><input id="fQty" value="${esc(it.qty)}" placeholder="e.g. 2 kg"></div>
@@ -1102,6 +1247,7 @@ const FORM={
   bulk(){const entries=parseEntries($('#bulkTxt').value);if(!entries.length){toast('Type or paste at least one item');return}
     if($('#bulkTpl'))addToTpl=$('#bulkTpl').checked;closeSheet();addEntries(entries,true)},
   item(f){saveItemForm(f.dataset.id,false)},
+  inv(f){invSave(f)},
   create(f){const name=$('#newName').value.trim();if(!name)return;const kind=f.querySelector('input[name=kind]:checked').value;
     const seen=new Set(),ents=parseEntries($('#newItems').value).filter(e=>{const k=e.name.toLowerCase();if(seen.has(k))return false;seen.add(k);return true});closeSheet();
     if(kind==='tpl'){const t={id:uid(),name,autoDay:null,budget:null,carry:[],items:ents.map(e=>item(e.name,e.qty))};state.templates.push(t);view={s:'tpl',id:t.id}}
@@ -1121,7 +1267,7 @@ document.addEventListener('change',e=>{if(e.target.id==='addTpl')addToTpl=e.targ
   if(e.target.id==='newFile'&&e.target.files[0]){const file=e.target.files[0];file.text().then(txt=>{const sp=parseShare(txt);if(sp){openImport(sp);return}const ta=$('#newItems');if(!ta)return;
     ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();ta.dispatchEvent(new Event('input',{bubbles:true}));
     const nm=$('#newName');if(nm&&!nm.value.trim())nm.value=cap(file.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim())}).catch(()=>toast('Couldn’t read that file'))}});
-document.addEventListener('input',e=>{if(e.target.dataset&&['name','price','listname'].includes(e.target.dataset.scan))scanEdit(e.target);if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
+document.addEventListener('input',e=>{if(e.target.id==='invQ'){view.q=e.target.value;const all=(state.catalog||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));$('#invList').innerHTML=invRows(all,view.q.toLowerCase());return}if(e.target.dataset&&['name','price','listname'].includes(e.target.dataset.scan))scanEdit(e.target);if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 document.addEventListener('paste',e=>{if(e.target.id!=='addInput')return;const t=(e.clipboardData||{}).getData?e.clipboardData.getData('text'):'';
   if(t&&/[\n,;]/.test(t)){e.preventDefault();e.target.value=t;FORM.add()}});
@@ -1139,11 +1285,30 @@ async function pull(){
 const MY_LIST=['Yoghurt','Joaquin juice','Strawberry milk','Small strawberry milk','Pororo juice','Cheese Whiz','Suka','White sugar','Tabasco','Honey',
   'Tuna','Corned beef','Luncheon meat','Likas or Belo Pink','Dove conditioner peptide','Lucky Me Sweet','Cup noodles','Lucky Me Macaroni',
   'Cheesecake','Wafer','Cookies 5x','Sumo cookies','Piyaya ube'];
+function basicItems(){return SEED_CATALOG.map(([code,name,cat,unit,qty])=>({id:uid(),name,qty,cat}))}
 function seed(){
-  if(state.seededList1||NATIVE)return;
-  const tpl={id:uid(),name:'Weekly groceries',autoDay:null,budget:null,carry:[],items:parseEntries(MY_LIST.join('\n')).map(e=>item(e.name,e.qty))};
-  if(state.example)state={templates:[],lists:[],prices:{}};
-  state.templates.unshift(tpl);state.seededList1=true;commit();
+  let changed=false;
+  if(!state.seededList1&&!NATIVE){  /* your handwritten list, Claude version only (kept from before) */
+    const tpl={id:uid(),name:'Weekly groceries',autoDay:null,budget:null,carry:[],items:parseEntries(MY_LIST.join('\n')).map(e=>item(e.name,e.qty))};
+    if(state.example)state={templates:[],lists:[],prices:state.prices||{}};
+    state.templates.unshift(tpl);state.seededList1=true;changed=true;
+  }
+  if((state.catalogV||0)<SEED_CATALOG_V){
+    if(state.example)state={templates:[],lists:[],prices:{}};
+    mergeSeedCatalog();
+    for(const [code,name,cat,unit] of SEED_CATALOG)if(!state.prices[name.toLowerCase()]&&!/per kg/.test(name))state.prices[name.toLowerCase()]=unit;
+    const basic=state.templates.find(t=>/^basic$/i.test(t.name.trim()));
+    if(!basic){state.templates.unshift({id:uid(),name:'Basic',autoDay:null,budget:null,carry:[],items:basicItems()});changed=true}
+    else{ /* your existing Basic: rename garbled scanned names to inventory names, add the rest */
+      let ren=0,add=0;const have=new Set();const prevItems=JSON.stringify(basic.items),bid=basic.id;
+      for(const it of basic.items){const e=invFind(it.name,null,it.qty);if(e&&!have.has(e.id)){if(it.name!==e.name){it.name=e.name;ren++}it.cat=e.cat;have.add(e.id)}}
+      for(const [code,name,cat,unit,qty] of SEED_CATALOG){if(basic.items.some(i=>i.name.toLowerCase()===name.toLowerCase()))continue;basic.items.push({id:uid(),name,qty,cat});add++}
+      if(ren||add){state.catalogV=SEED_CATALOG_V;commit();
+        toast(`Basic template updated: ${ren} renamed, ${add} added`,()=>{const t=T(bid);if(t){t.items=JSON.parse(prevItems);commit()}});return}
+    }
+    changed=true;
+  }
+  if(changed)commit();
 }
 (async()=>{try{
   if(!window.claude||!window.claude.use)return;
