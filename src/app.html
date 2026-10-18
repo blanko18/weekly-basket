@@ -142,6 +142,11 @@ h2.eyebrow{font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:
 .chip{font-size:.85rem;padding:5px 10px;border-radius:99px;background:var(--accent-soft);color:var(--ink)}
 .chip small{color:var(--muted);margin-left:4px}
 .chip.dup{background:transparent;border:1px dashed var(--line);color:var(--muted);text-decoration:line-through}
+.btn svg{width:18px;height:18px;flex:none}
+.top .btn{white-space:nowrap;flex:none}
+.brand{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:380px){.brand{font-size:1.3rem}.top .icon{width:36px}}
+@media (max-width:420px){.top .lbl{display:none}.top .btn.primary.sm{font-size:1.2rem;padding-inline:13px}}
 .tools{display:flex;gap:8px;margin-top:10px}
 .tools .btn{flex:1;background:transparent;gap:8px}
 .tools svg{width:18px;height:18px}
@@ -409,14 +414,28 @@ function rowsText(data){
   rows.sort((a,b)=>a.y0-b.y0);
   return rows.map(r=>r.segs.sort((a,b)=>a.x0-b.x0).map(q=>q.t).join('   ')).join('\n');
 }
-let scanState=null;
-function scanSheet(){
-  sheet(`<h3>Scan a receipt</h3><p style="margin:0 0 14px;color:var(--muted);font-size:.92rem">Take a clear, straight photo of the receipt in good light. Prices are read on your phone and matched to this list. You can check everything before it’s applied.</p>
-    <div class="actions"><label class="btn primary block" style="cursor:pointer">Take photo<input type="file" id="scanCam" accept="image/*" capture="environment" hidden></label>
+let scanState=null, scanTarget=null;
+/* target: {kind:'list'|'tpl', id} for an existing list/template, or {kind:'newList'|'newTpl'} */
+function targetObj(t){return !t?null:t.kind==='list'?L(t.id):t.kind==='tpl'?T(t.id):null}
+function targetItems(t){const o=targetObj(t);return o?o.items:[]}
+function scanSheet(target){
+  scanTarget=target||null;
+  const act=state.lists.filter(l=>l.status==='active');
+  const opt=(v,label,sel)=>`<option value="${v}" ${sel?'selected':''}>${esc(label)}</option>`;
+  const cur=scanTarget?scanTarget.kind+':'+(scanTarget.id||''):'newList:';
+  sheet(`<h3>Scan a receipt</h3>
+    <div class="field"><label for="scanTo">Add the receipt’s items to</label><select id="scanTo">
+      <optgroup label="New">${opt('newList:','New shopping list',cur==='newList:')}${opt('newTpl:','New template',cur==='newTpl:')}</optgroup>
+      ${act.length?`<optgroup label="Shopping lists">${act.map(l=>opt('list:'+l.id,l.name,cur==='list:'+l.id)).join('')}</optgroup>`:''}
+      ${state.templates.length?`<optgroup label="Templates">${state.templates.map(t=>opt('tpl:'+t.id,t.name,cur==='tpl:'+t.id)).join('')}</optgroup>`:''}
+    </select></div>
+    <p style="margin:0 0 14px;color:var(--muted);font-size:.9rem">Take a clear, straight photo in good light. The text is read on your phone, and you can check every line before anything is added.</p>
+    <div class="actions"><label class="btn primary block" style="cursor:pointer">${ICON.camera}Take photo<input type="file" id="scanCam" accept="image/*" capture="environment" hidden></label>
     <label class="btn block" style="cursor:pointer">Choose a photo<input type="file" id="scanPick" accept="image/*" hidden></label></div>`);
 }
+function readScanTo(){const el=$('#scanTo');if(!el)return;const [kind,id]=el.value.split(':');scanTarget=id?{kind,id}:{kind}}
 async function runScan(file){
-  const l=L(view.id);if(!l||!file)return;
+  readScanTo();if(!file)return;const target=scanTarget||{kind:'newList'};
   sheet(`<h3>Reading receipt…</h3><div class="bar" style="margin:6px 0 10px"><i id="scanBar" style="width:2%"></i></div><p class="flabel" id="scanMsg" style="margin:0">Preparing photo</p>`);
   const set=(msg,p)=>{const b=$('#scanBar'),m=$('#scanMsg');if(b)b.style.width=Math.max(2,Math.round(p*100))+'%';if(m)m.textContent=msg};
   try{
@@ -425,46 +444,82 @@ async function runScan(file){
     const w=await getOcr((st,p)=>{if(/recogniz/i.test(st))set('Reading text',.15+p*.85);else if(/load|init/i.test(st))set('Loading text reader',.05+p*.1)});
     const {data}=await w.recognize(canvas,{},{text:true,blocks:true});
     const text=rowsText(data);const r=parseReceipt(text);
-    scanState={listId:l.id,rows:matchReceipt(r.items,l.items),total:r.total,text};
+    const isNew=target.kind==='newList'||target.kind==='newTpl';
+    scanState={target,rows:matchReceipt(r.items,targetItems(target)),total:r.total,text,
+      name:'Receipt '+new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'}),
+      bought:target.kind==='newList'||target.kind==='list'};
+    if(isNew)scanState.rows.forEach(x=>x.match='new');
     reviewSheet();
   }catch(e){
     console.error(e);
     sheet(`<h3>Couldn’t read the receipt</h3><p style="margin:0 0 14px;color:var(--muted)">${NATIVE||window.WB_LOCAL_OCR?'Something went wrong while reading the photo. Try again with a sharper photo.':'Receipt scanning couldn’t start here. It works in the Weekly Basket phone app, which reads receipts offline.'}</p>
-      <div class="actions"><button class="btn primary block" data-act="scanReceipt">Try again</button><button class="btn ghost block" data-act="closeSheet">Close</button></div>`);
+      <div class="actions"><button class="btn primary block" data-act="scanAgain">Try again</button><button class="btn ghost block" data-act="closeSheet">Close</button></div>`);
   }
 }
 function reviewSheet(){
-  const st=scanState;const l=L(st.listId);if(!l){closeSheet();return}
-  const opts=sel=>`<option value="new" ${sel==='new'?'selected':''}>Add as new item</option>`+l.items.map(i=>`<option value="${i.id}" ${sel===i.id?'selected':''}>${esc(i.name)}${i.done?' ✓':''}</option>`).join('');
-  const sum=st.rows.filter(r=>r.on).reduce((s,r)=>s+(r.price||0),0);
-  const matched=st.rows.filter(r=>r.on&&r.match!=='new').length,added=st.rows.filter(r=>r.on&&r.match==='new').length;
+  const st=scanState;if(!st)return;const t=st.target;const isNew=t.kind==='newList'||t.kind==='newTpl';const isTpl=t.kind==='tpl'||t.kind==='newTpl';
+  const obj=targetObj(t);if(!isNew&&!obj){closeSheet();return}
+  const items=obj?obj.items:[];
+  const opts=sel=>`<option value="new" ${sel==='new'?'selected':''}>Add as new item</option>`+items.map(i=>`<option value="${i.id}" ${sel===i.id?'selected':''}>${isTpl?'Already in: ':''}${esc(i.name)}${i.done?' ✓':''}</option>`).join('');
+  const on=st.rows.filter(r=>r.on);const sum=on.reduce((s,r)=>s+(r.price||0),0);
+  const have=new Set(items.map(i=>i.name.toLowerCase()));
+  const matched=on.filter(r=>r.match!=='new').length+on.filter(r=>r.match==='new'&&have.has((r.name||'').trim().toLowerCase())).length;
+  const added=new Set(on.filter(r=>r.match==='new').map(r=>(r.name||'').trim().toLowerCase()).filter(n=>n&&!have.has(n))).size;
+  const where=isNew?(t.kind==='newList'?'a new shopping list':'a new template'):`“${esc(obj.name)}”`;
+  const label=isTpl?(added?`Add ${added} item${added===1?'':'s'} to template`:'Everything is already in the template'):t.kind==='newList'?`Create list with ${added} item${added===1?'':'s'}`:
+    `Apply${matched?` · ${matched} matched`:''}${added?` · ${added} new`:''}`;
   sheet(`<h3>Check what was found</h3>
-    ${st.rows.length?`<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">${st.rows.length} line${st.rows.length>1?'s':''} found · ${money2(sum)}${st.total?` · receipt total ${money2(st.total)}`:''}${st.total&&Math.abs(st.total-sum)>0.5?' <b style="color:var(--warn)">(check for missed lines)</b>':''}</p>
+    ${st.rows.length?`<p style="margin:0 0 10px;color:var(--muted);font-size:.9rem">Adding to ${where} · ${st.rows.length} line${st.rows.length>1?'s':''} · ${money2(sum)}${st.total?` · receipt total ${money2(st.total)}`:''}${st.total&&Math.abs(st.total-sum)>0.5?' <b style="color:var(--warn)">(some lines may be missing)</b>':''}</p>
+    ${isNew?`<div class="field"><label for="scanName">${t.kind==='newList'?'List':'Template'} name</label><input id="scanName" data-scan="listname" value="${esc(st.name)}"></div>`:''}
+    ${!isTpl?`<label class="pick" style="border:0;padding:2px 0 8px"><input type="checkbox" data-scan="bought" ${st.bought?'checked':''}><span style="font-weight:500">Already bought: check items off and save prices <small>(untick to add them as things to buy)</small></span></label>`:''}
     <div id="scanRows">${st.rows.map((r,i)=>`<div class="srow ${r.on?'':'off'}" data-i="${i}">
       <label class="srow-on"><input type="checkbox" data-scan="on" ${r.on?'checked':''} aria-label="Use this line"></label>
-      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name on receipt">
-        <div class="srow-sub"><select data-scan="match" aria-label="Match to list item">${opts(r.match)}</select>
+      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name">
+        <div class="srow-sub">${isNew?`<span class="flabel" style="align-self:center">${r.qty?'Qty '+esc(r.qty):'New item'}</span>`:`<select data-scan="match" aria-label="Match to an item">${opts(r.match)}</select>`}
         <input class="srow-price" data-scan="price" inputmode="decimal" value="${r.price!=null?r.price.toFixed(2):''}" aria-label="Price"></div></div></div>`).join('')}</div>
-    <div class="actions" style="margin-top:14px"><button class="btn primary block" data-act="applyScan" ${matched+added?'':'disabled'}>Apply${matched?` · ${matched} matched`:''}${added?` · ${added} new`:''}</button>`
+    <div class="actions" style="margin-top:14px"><button class="btn primary block" data-act="applyScan" ${(isTpl?added:matched+added)?'':'disabled'}>${label}</button>`
     :`<p style="margin:0 0 14px;color:var(--muted)">No item lines with prices were found. Try a straighter, closer photo with the whole receipt in view.</p><div class="actions">`}
-    <button class="btn block" data-act="scanReceipt">Scan another photo</button>
+    <button class="btn block" data-act="scanAgain">Scan another photo</button>
     <details style="margin-top:6px"><summary class="flabel" style="cursor:pointer">Show scanned text</summary><textarea readonly style="width:100%;height:160px;margin-top:8px;font-family:var(--mono);font-size:.8rem;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);padding:8px">${esc(st.text)}</textarea></details></div>`);
 }
 function scanEdit(el){
-  const row=el.closest('.srow');if(!row||!scanState)return;const r=scanState.rows[+row.dataset.i];const k=el.dataset.scan;
+  if(!scanState)return;const k=el.dataset.scan;
+  if(k==='listname'){scanState.name=el.value;return}
+  if(k==='bought'){scanState.bought=el.checked;return}
+  const row=el.closest('.srow');if(!row)return;const r=scanState.rows[+row.dataset.i];
   if(k==='on'){r.on=el.checked;reviewSheet();return}
   if(k==='name')r.name=el.value;
   if(k==='price')r.price=num(el.value);
   if(k==='match'){r.match=el.value;reviewSheet()}
 }
 function applyScan(){
-  const st=scanState;const l=st&&L(st.listId);if(!l)return;let m=0,a=0;
-  for(const r of st.rows){if(!r.on)continue;
-    if(r.match!=='new'){const it=l.items.find(i=>i.id===r.match);if(!it)continue;if(r.price)it.price=r.price;it.done=true;if(r.price)state.prices[it.name.toLowerCase()]=r.price;m++}
-    else{const name=(r.name||'').trim();if(!name)continue;const ex=l.items.find(i=>i.name.toLowerCase()===name.toLowerCase());
-      if(ex){if(r.price)ex.price=r.price;ex.done=true;m++;continue}
-      l.items.push({...item(name,''),done:true,price:r.price||null});if(r.price)state.prices[name.toLowerCase()]=r.price;a++}}
-  scanState=null;closeSheet();commit();toast(`Updated ${m} item${m===1?'':'s'}${a?`, added ${a}`:''} from the receipt`);
+  const st=scanState;if(!st)return;const t=st.target;const bought=st.bought;
+  /* merge repeated receipt lines (e.g. the same item scanned twice) */
+  const fresh=[];const byName={};
+  for(const r of st.rows){if(!r.on||r.match!=='new')continue;const name=(r.name||'').trim();if(!name)continue;const k=name.toLowerCase();
+    if(byName[k]){const f=byName[k];f.count++;f.price=(f.price||0)+(r.price||0)||null;f.qty=f.count+'x';continue}
+    byName[k]={name,price:r.price||null,qty:r.qty||'',count:1};fresh.push(byName[k])}
+  const remember=(n,p)=>{if(p)state.prices[n.toLowerCase()]=p};
+  let m=0,a=0,dest=null;
+  if(t.kind==='newList'||t.kind==='list'){
+    let l=t.kind==='list'?L(t.id):null;
+    if(!l){l={id:uid(),name:(st.name||'Receipt').trim()||'Receipt',createdAt:Date.now(),status:'active',items:[]};state.lists.unshift(l)}
+    for(const r of st.rows){if(!r.on||r.match==='new')continue;const it=l.items.find(i=>i.id===r.match);if(!it)continue;
+      if(bought){if(r.price)it.price=r.price;it.done=true}remember(it.name,r.price);m++}
+    for(const f of fresh){const ex=l.items.find(i=>i.name.toLowerCase()===f.name.toLowerCase());
+      if(ex){if(f.price)ex.price=f.price;if(bought)ex.done=true;m++;continue}
+      l.items.push({...item(f.name,f.qty),done:bought,price:bought?f.price:null});remember(f.name,f.count>1?null:f.price);a++}
+    dest={s:'list',id:l.id};
+  }else{
+    let tp=t.kind==='tpl'?T(t.id):null;
+    if(!tp){tp={id:uid(),name:(st.name||'Receipt').trim()||'Receipt',autoDay:null,budget:null,carry:[],items:[]};state.templates.push(tp)}
+    for(const r of st.rows){if(!r.on||r.match==='new')continue;const it=tp.items.find(i=>i.id===r.match);if(it){remember(it.name,r.price);m++}}
+    for(const f of fresh){if(tp.items.some(i=>i.name.toLowerCase()===f.name.toLowerCase())){m++;continue}
+      tp.items.push(item(f.name,f.qty));remember(f.name,f.count>1?null:f.price);a++}
+    dest={s:'tpl',id:tp.id};
+  }
+  scanState=null;closeSheet();view=dest;commit();scrollTo(0,0);
+  toast(a&&!m?`Added ${a} item${a===1?'':'s'} from the receipt`:`Updated ${m} item${m===1?'':'s'}${a?`, added ${a}`:''} from the receipt`);
 }
 window.__wbParseReceipt=parseReceipt;window.__wbSpeechToText=speechToText;window.__wbMatchReceipt=matchReceipt;
 window.__wbRowsText=rowsText;
@@ -530,7 +585,7 @@ function paintSync(){const el=$('#sync');if(el)el.textContent=cloud?'Saved to yo
 function homeView(){
   const active=state.lists.filter(l=>l.status==='active');
   const done=state.lists.filter(l=>l.status==='done').sort((a,b)=>b.finishedAt-a.finishedAt);
-  return `<header class="top"><div class="brand">Weekly<span>.</span>Basket</div><button class="icon" data-act="shareSheet" aria-label="Share lists and templates" title="Share">${ICON.share}</button><button class="btn primary sm" data-act="newSheet">+ New</button></header>
+  return `<header class="top"><div class="brand">Weekly<span>.</span>Basket</div><button class="icon" data-act="scanReceipt" aria-label="Scan a receipt" title="Scan a receipt">${ICON.camera}</button><button class="icon" data-act="shareSheet" aria-label="Share lists and templates" title="Share">${ICON.share}</button><button class="btn primary sm" data-act="newSheet" aria-label="New list or template">+<span class="lbl">&nbsp;New</span></button></header>
   ${state.example?`<div class="banner"><div><b>Example data.</b> Tap anything to try it. Your first change replaces this sample.</div></div>`:''}
   <h2 class="eyebrow">Shopping now</h2>
   <div class="stack">${active.length?active.map(l=>{const d=l.items.filter(i=>i.done).length,n=l.items.length;
@@ -568,9 +623,9 @@ function listView(){
     <button class="icon" data-act="listMenu" aria-label="List options">${ICON.more}</button></header>
   <div class="prog"><div class="bar"><i style="width:${n?d/n*100:0}%"></i></div>
     <div class="nums"><span><b>${d}</b> of ${n} in the basket</span><span class="${l.budget&&t>l.budget?'over':''}">${t?'<b>'+money(t)+'</b>':''}${l.budget?(t?' of ':'Budget ')+money(l.budget):''}</span></div></div>
-  ${n?`<div class="tools"><button class="btn sm" data-act="scanReceipt">${ICON.camera}Scan receipt</button><button class="btn sm" data-act="report" data-id="${l.id}">${ICON.receipt}Report</button></div>`:''}
+  <div class="tools"><button class="btn sm" data-act="scanReceipt">${ICON.camera}Scan receipt</button>${n?`<button class="btn sm" data-act="report" data-id="${l.id}">${ICON.receipt}Report</button>`:''}</div>
   ${n&&d===n?`<div class="allset"><div>Everything's in the basket.</div><button class="btn sm" data-act="finish">See report</button></div>`:''}
-  ${!n?`<div class="empty" style="margin-top:16px">This list is empty. Add items below, separated by commas.<div style="margin-top:12px"><button class="btn sm" data-act="bulkAdd">Paste a list</button></div></div>`:''}
+  ${!n?`<div class="empty" style="margin-top:16px">This list is empty. Add items below, separated by commas.<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" data-act="bulkAdd">Paste a list</button><button class="btn sm" data-act="scanReceipt">${ICON.camera}From a receipt</button></div></div>`:''}
   ${groupItems(todo).map(([c,its])=>`<div class="group"><h3><span>${c}</span><span>${its.length}</span></h3><div class="items">${its.map(rowList).join('')}</div></div>`).join('')}
   ${got.length?`<div class="group"><h3><span>In the basket</span><span>${got.length}</span></h3><div class="items">${got.map(rowList).join('')}</div></div>`:''}`;
 }
@@ -584,7 +639,7 @@ function tplView(){
   ${t.items.length?groupItems(t.items).map(([c,its])=>`<div class="group"><h3><span>${c}</span><span>${its.length}</span></h3><div class="items">${its.map(i=>`<div class="item">
       <button class="itext pad" data-act="editItem" data-id="${i.id}"><span class="iname">${esc(i.name)}</span>${i.qty?`<span class="iqty">${esc(i.qty)}</span>`:''}</button>
       <button class="icon" data-act="rmTplItem" data-id="${i.id}" aria-label="Remove ${esc(i.name)}">${ICON.x}</button></div>`).join('')}</div></div>`).join('')
-    :`<div class="empty" style="margin-top:16px">Add the things you buy every time. Each new list starts with these.<div style="margin-top:12px"><button class="btn sm" data-act="bulkAdd">Paste a list</button></div></div>`}`;
+    :`<div class="empty" style="margin-top:16px">Add the things you buy every time. Each new list starts with these.<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn sm" data-act="bulkAdd">Paste a list</button><button class="btn sm" data-act="scanReceipt">${ICON.camera}From a receipt</button></div></div>`}`;
 }
 function receiptLines(l){
   const got=l.items.filter(i=>i.done),miss=l.items.filter(i=>!i.done),t=total(l);
@@ -818,7 +873,8 @@ const ACT={
     bulkPreview();if(pre)$('#bulkTxt').focus()},
   voice(){ACT.bulkAdd();setTimeout(voiceStart,NATIVE?50:150)},
   voiceGo(){voiceStart()},
-  scanReceipt(){scanSheet()},
+  scanReceipt(){scanSheet(view.s==='list'?{kind:'list',id:view.id}:view.s==='tpl'?{kind:'tpl',id:view.id}:view.s==='report'?{kind:'list',id:view.id}:null)},
+  scanAgain(){scanSheet(scanState?scanState.target:scanTarget)},
   applyScan(){applyScan()},
   shareSheet(d){const pre=d&&d.pre;const act=state.lists.filter(l=>l.status==='active');
     const row=(k,id,name,meta,on)=>`<label class="pick"><input type="checkbox" data-k="${k}" value="${id}" ${on?'checked':''}><span>${esc(name)} <small>${meta}</small></span></label>`;
@@ -875,7 +931,7 @@ const ACT={
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px"><span class="flabel" id="newCount"></span>
         <label class="btn sm ghost" style="cursor:pointer">Load from text file<input type="file" id="newFile" accept=".txt,.csv,.md,.json,text/plain,application/json" hidden></label></div></div>
       <button class="btn primary block" type="submit">Create</button></form>
-      <div class="sep"></div><label class="btn block" style="cursor:pointer">Import shared file<input type="file" id="impFile" accept=".json,application/json,text/plain" hidden></label>`)},
+      <div class="sep"></div><button class="btn block" data-act="scanReceipt" style="margin-bottom:8px">${ICON.camera}Create from a receipt photo</button><label class="btn block" style="cursor:pointer">Import shared file<input type="file" id="impFile" accept=".json,application/json,text/plain" hidden></label>`)},
   listMenu(){const l=L(view.id);const t=l.templateId&&T(l.templateId);
     sheet(`<h3>List options</h3><form data-form="listMeta">
       <div class="field"><label for="mName">Name</label><input id="mName" value="${esc(l.name)}" required></div>
@@ -898,7 +954,7 @@ const ACT={
       <div class="two"><div class="field"><label for="tDay">Start a new list every</label><select id="tDay"><option value="">Off (start manually)</option>${DAYS.map((d,i)=>`<option value="${i}" ${t.autoDay===i?'selected':''}>${d}</option>`).join('')}</select></div>
       <div class="field"><label for="tBudget">Weekly budget (₱)</label><input id="tBudget" inputmode="decimal" value="${t.budget??''}" placeholder="Optional"></div></div>
       <button class="btn primary block" type="submit">Save</button></form>
-      <div class="sep"></div><div class="actions"><button class="btn block" data-act="shareSheet" data-pre="${t.id}">Share this template</button><button class="btn danger block" data-act="delTpl">Delete template</button></div>`)},
+      <div class="sep"></div><div class="actions"><button class="btn block" data-act="scanReceipt">Add items from a receipt photo</button><button class="btn block" data-act="shareSheet" data-pre="${t.id}">Share this template</button><button class="btn danger block" data-act="delTpl">Delete template</button></div>`)},
   delTpl(){const t=T(view.id);closeSheet();withUndo(`Deleted ${t.name} template`,()=>{state.templates=state.templates.filter(x=>x.id!==t.id);view={s:'home'}})}
 };
 function saveItemForm(id,putInBasket){
@@ -932,13 +988,13 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const fn=FORM[f.dataset.form];if(fn)fn(f)});
 document.addEventListener('change',e=>{if(e.target.id==='addTpl')addToTpl=e.target.checked;
   if((e.target.id==='scanCam'||e.target.id==='scanPick')&&e.target.files[0]){runScan(e.target.files[0]);return}
-  if(e.target.dataset&&e.target.dataset.scan&&e.target.dataset.scan!=='name'&&e.target.dataset.scan!=='price'){scanEdit(e.target);return}
+  if(e.target.dataset&&e.target.dataset.scan&&!['name','price','listname'].includes(e.target.dataset.scan)){scanEdit(e.target);return}
   if(e.target.id==='bulkFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const ta=$('#bulkTxt');if(!ta)return;ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();bulkPreview()}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='impFile'&&e.target.files[0]){e.target.files[0].text().then(txt=>{const p=parseShare(txt);if(p)openImport(p);else toast('That isn’t a Weekly Basket file. For a plain list, paste it into Items.')}).catch(()=>toast('Couldn’t read that file'))}
   if(e.target.id==='newFile'&&e.target.files[0]){const file=e.target.files[0];file.text().then(txt=>{const sp=parseShare(txt);if(sp){openImport(sp);return}const ta=$('#newItems');if(!ta)return;
     ta.value=(ta.value.trim()?ta.value.trim()+'\n':'')+txt.trim();ta.dispatchEvent(new Event('input',{bubbles:true}));
     const nm=$('#newName');if(nm&&!nm.value.trim())nm.value=cap(file.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim())}).catch(()=>toast('Couldn’t read that file'))}});
-document.addEventListener('input',e=>{if(e.target.dataset&&(e.target.dataset.scan==='name'||e.target.dataset.scan==='price'))scanEdit(e.target);if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
+document.addEventListener('input',e=>{if(e.target.dataset&&['name','price','listname'].includes(e.target.dataset.scan))scanEdit(e.target);if(e.target.id==='bulkTxt')bulkPreview();if(e.target.id==='newItems'){const n=new Set(parseEntries(e.target.value).map(x=>x.name.toLowerCase())).size;$('#newCount').textContent=n?`${n} item${n>1?'s':''} found`:''}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 document.addEventListener('paste',e=>{if(e.target.id!=='addInput')return;const t=(e.clipboardData||{}).getData?e.clipboardData.getData('text'):'';
   if(t&&/[\n,;]/.test(t)){e.preventDefault();e.target.value=t;FORM.add()}});
