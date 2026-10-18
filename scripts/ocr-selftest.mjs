@@ -10,7 +10,8 @@ const root = join(dirname(new URL(import.meta.url).pathname), '..', 'www');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2',
   '.wasm': 'application/wasm', '.gz': 'application/gzip', '.json': 'application/json', '.png': 'image/png' };
 const server = createServer(async (req, res) => {
-  const p = join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+  const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  const p = path.startsWith('/fixtures/') ? join(root, '..', 'test', path) : join(root, path);
   try { const b = await readFile(p.endsWith('/') ? join(p, 'index.html') : p); res.writeHead(200, { 'content-type': types[extname(p)] || 'application/octet-stream' }); res.end(b); }
   catch { res.writeHead(404); res.end(); }
 }).listen(8765);
@@ -51,6 +52,13 @@ try {
   console.log(JSON.stringify(result.parsed, null, 1), '\n', result.ms, 'ms');
   annotate('notice', 'Receipt reader tilted photo', JSON.stringify(result.tilted));
   summary = `${result.ms} ms\nTEXT:\n${result.text}\nPARSED: ${JSON.stringify(result.parsed)}`;
+  // real photo of a thermal receipt (12 items); guards against regressions in clean-up/parsing
+  const truth = [189.00, 71.50, 195.57, 207.70, 225.50, 73.75, 256.75, 219.75, 95.50, 31.00, 127.33, 22.00];
+  const real = await page.evaluate(async () => { const b = await (await fetch('/fixtures/receipt-sm-1.jpg')).blob(); return window.__wbOcrImage(b); });
+  const left = [...truth]; let hit = 0;
+  for (const it of real.parsed.items) { const k = left.findIndex(t => it.price != null && Math.abs(t - it.price) < 0.005); if (k >= 0) { left.splice(k, 1); hit++; } }
+  annotate('notice', `Real receipt: ${real.parsed.items.length} items, ${hit}/12 prices exact`, real.text + '\n' + JSON.stringify(real.parsed.items));
+  if (real.parsed.items.length < 10 || hit < 7) throw new Error(`Real receipt regression: ${real.parsed.items.length} items, ${hit}/12 prices`);
   const names = result.parsed.items.map(i => i.name.toLowerCase()).join(' | ');
   const ok = result.parsed.items.length >= 4 && /cheese whiz/.test(names) && result.parsed.total === 446;
   if (!ok) throw new Error('Receipt reader self-test did not find the expected items/total');

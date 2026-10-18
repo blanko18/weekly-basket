@@ -341,7 +341,7 @@ async function prepImage(file){
   const url=URL.createObjectURL(file);
   try{
     const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
-    const long=Math.max(img.naturalWidth,img.naturalHeight),k=Math.min(1,2200/long)*(long<1000?1.6:1);
+    const long=Math.max(img.naturalWidth,img.naturalHeight),k=Math.min(1.6,1500/long);
     const w=Math.round(img.naturalWidth*k),h=Math.round(img.naturalHeight*k);
     const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});
     x.drawImage(img,0,0,w,h);
@@ -355,33 +355,108 @@ async function prepImage(file){
     x.putImageData(d,0,0);return c;
   }finally{URL.revokeObjectURL(url)}
 }
-const SKIP_RX=/\b(sub\s*-?\s*total|total|amount\s*due|amt\s*due|cash|change|tender|vat|vatable|non-?vat|zero\s*rated|exempt|discount|disc\b|less|senior|sc\b|pwd|points?|balance|gcash|maya|paymaya|card|visa|master|debit|credit|qty|items?\s*purchased|no\.?\s*of\s*items|invoice|receipt|tin\b|min\b|s\/n|sn\b|pos\b|cashier|terminal|date|time|thank|ref|approval|auth|php\s*total|rounding|service\s*charge|tax)\b/i;
+const SKIP_RX=/\b(sub\s*-?\s*total|total|amount\s*due|amt\s*due|cash|change|tendered|amt\s*tender|cash\s*tender|vat|vatable|non-?vat|zero\s*rated|vat\s*exempt|exempt\s*sales|discount|sc\s*disc|pwd|points?|balance|gcash|maya|paymaya|credit\s*card|debit|card\s*payment|items?\s*purchased|no\.?\s*of\s*items|rounding|service\s*charge|php)\b/i;
+/* header/footer words: only used to drop lines that have no price */
+const WEAK_RX=/\b(invoice|receipt|tin|min|s\/n|sn|pos|cashier|terminal|date|time|thank|ref|approval|auth|address|tel|telephone|branch|store|member|customer|official|accreditation|permit|serial|machine|visa|master|card|qty|senior|less)\b/i;
 function money_(s){const m=String(s).replace(/\s/g,'').replace(/[Oo]/g,'0').replace(/(\d),(\d{2})$/,'$1.$2').replace(/,/g,'');const v=parseFloat(m);return isFinite(v)?v:null}
-function cleanName(s){
-  s=s.replace(/^[\s*#.:\-]+/,'').replace(/^\d{5,}\s*/,'').replace(/\s+\d{6,}\b/g,'').replace(/[|_~=]+/g,' ').replace(/\s{2,}/g,' ').trim();
-  s=s.replace(/(?:\s+[xX]|\s*@)\s*$/,'').trim();
-  return s.toLowerCase().replace(/\b([a-z])/g,c=>c.toUpperCase()).replace(/\b(\d+)(G|Ml|Kg|L|Pcs)\b/g,(m,a,b)=>a+b.toLowerCase());
+/* Common grocery-receipt abbreviations (whole words only); learned names from your own edits take priority */
+const ABBR={chcken:'Chicken',chckn:'Chicken',chkn:'Chicken',ckn:'Chicken',chken:'Chicken',qtr:'Quarter',ptties:'Patties',ptty:'Patty',shts:'Sheets',brth:'Breathable',
+  uns:'Unscented',mlky:'Milky',mlk:'Milk',fsh:'Fresh',blsm:'Blossom',rg:'Regular',reg:'Regular',pk:'Pack',pck:'Pack',pwdr:'Powder',sft:'Soft',dtrgnt:'Detergent',
+  cndtnr:'Conditioner',cond:'Conditioner',shmp:'Shampoo',lqd:'Liquid',wsh:'Wash',bf:'Beef',prk:'Pork',grnd:'Ground',brgr:'Burger',bttr:'Butter',chs:'Cheese',
+  crm:'Cream',swt:'Sweet',spcy:'Spicy',orig:'Original',asst:'Assorted',ylw:'Yellow',wht:'White',brwn:'Brown',grn:'Green',lrg:'Large',sml:'Small',
+  tissu:'Tissue',tss:'Tissue',ndl:'Noodles',ndls:'Noodles',sce:'Sauce',sauc:'Sauce',vngr:'Vinegar',sy:'Soy',ktchp:'Ketchup',mayo:'Mayonnaise',
+  hm:'Ham',bcn:'Bacon',sgr:'Sugar',slt:'Salt',ol:'Oil',cfee:'Coffee',cff:'Coffee',ltr:'L',ltrs:'L'};
+function splitWords(s){
+  return s.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/([A-Z]{2,})([A-Z][a-z])/g,'$1 $2')
+    .replace(/([A-Za-z]{2,})(\d)/g,'$1 $2').replace(/(\d)([A-Za-z]{3,})/g,'$1 $2');
 }
-function parseReceipt(text){
-  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[“”"']/g,'').trim()).filter(Boolean);
-  const items=[];let total=null;
-  const PRICE=/(?:^|\s)(-?[\dOo]{1,3}(?:[,\s][\dOo]{3})*[.,]\s?[\dOo]{2})\s*[A-Z*#]{0,2}\s*$/;
-  const QTY=/^\s*(\d+(?:\.\d+)?)\s*(?:@|x|X|pcs?\s*@|PC\s*@)\s*(\d+[.,]\d{2})\s+(\d+[.,]\d{2})/;
-  for(const raw of lines){
-    const line=raw.replace(/\s+/g,' ');
-    const q=line.match(QTY);
-    if(q){const last=items[items.length-1];const tot=money_(q[3]);
-      if(last&&!last.qtyLine){last.price=tot;last.qty=q[1];last.qtyLine=true}continue}
-    const m=line.match(PRICE);if(!m)continue;
-    if(!/\d/.test(m[1]))continue;const price=money_(m[1]);if(price==null)continue;
-    const before=line.slice(0,m.index).trim();
-    if(/\btotal\b|amount\s*due|amt\s*due/i.test(before)&&!/sub\s*-?\s*total/i.test(before)){if(price>0)total=price;continue}
-    if(SKIP_RX.test(before))continue;
-    if(price<=0||price>100000)continue;
-    const name=cleanName(before);
-    if((name.match(/[a-z]/gi)||[]).length<2)continue;
-    items.push({name,price,qty:''});
+function cleanName(s){
+  s=s.replace(/^\s*(?:[+*#†‡»«>]|[tf](?=\s))\s*/,'').replace(/^\d{5,}\s*/,'').replace(/\s+\d{6,}\b/g,'').replace(/[|_~=»«]+/g,' ');
+  s=s.replace(/(?<=[A-Za-z])1(?=[A-Za-z])/g,'l').replace(/(?<=[A-Za-z])0(?=[A-Za-z])/g,'o');
+  s=splitWords(s).replace(/\s{2,}/g,' ').trim().replace(/(?:\s+[xX]|\s*@)\s*$/,'').replace(/\s+[^\sA-Za-z0-9]{1,2}$/,'').trim();
+  const words=s.split(' ').map(w=>{const k=w.toLowerCase().replace(/[^a-z]/g,'');if(ABBR[k]&&k===w.toLowerCase())return ABBR[k];
+    if(/^\d+(?:g|ml|kg|l|s|pcs)$/i.test(w))return w.toLowerCase();
+    if(/^[A-Z]{2,4}$/.test(w)&&!/[AEIOU]/.test(w))return w;   /* keep brand initials like SMB, CDO */
+    return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()});
+  return words.join(' ');
+}
+function parsePaste(text){
+  /* text from ChatGPT / Google Lens / notes: markdown or tab tables, one-cell-per-line copies, or plain "name ... price" lines */
+  const PR=/^(?:₱|PHP|Php|P)?\s*(-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(?:PHP|php)?$/;
+  const QT=/^(\d+(?:\.\d+)?)\s*(kg|g|kilos?|pcs?|pieces?|x|×)?$|^(\d+)\s*[x×]\s*(?:₱|PHP|P)?\s*\d+(?:\.\d{2})?$/i;
+  const HEAD=/^(#|no\.?|item|items|product|description|qty|quantity|quantity\s*\/\s*weight|weight|price|amount|total\s*price|unit\s*price)$/i;
+  const qtyOf=c=>{const m=c.match(QT);if(!m)return null;if(m[3])return m[3]+'x';const n=parseFloat(m[1]);const u=(m[2]||'').toLowerCase();
+    if(/kg|kilo/.test(u))return (+n.toFixed(3))+' kg';if(u==='g')return n+' g';return n===1?'':(Number.isInteger(n)?n+'x':(+n.toFixed(3))+' kg')};
+  const money=c=>{const m=c.replace(/\s/g,'').match(PR);return m?parseFloat(m[1].replace(/,/g,'')):null};
+  const rows=[];let total=null;
+  const lines=String(text).split(/\r?\n/).map(l=>l.replace(/\*\*|__/g,'').trim()).filter(l=>l&&!/^\|?\s*:?-{2,}/.test(l));
+  const cellsOf=l=>/\t|\|/.test(l)?l.split(/\t|\|/).map(c=>c.replace(/\*\*|__/g,'').trim()).filter(Boolean):null;
+  const fromCells=cells=>{let price=null,pi=-1;for(let i=cells.length-1;i>=0;i--){const v=money(cells[i]);if(v!=null&&/\.\d{2}$|₱|PHP/i.test(cells[i])){price=v;pi=i;break}}
+    if(pi<0)return null;let qty='',name='';
+    cells.forEach((c,i)=>{if(i===pi)return;if(/^\d{1,3}\.?$/.test(c)&&i===0)return;const q=qtyOf(c);if(q!==null&&i>0&&!name.includes(c)){qty=q||qty;return}
+      if(/[a-z]/i.test(c)&&c.length>name.length&&!HEAD.test(c))name=c});
+    name=name.replace(/^\d{1,3}[.)]\s+/,'').replace(/[\s\-–—:.]+$/,'').trim();
+    return name?{name,price,qty}:null};
+  /* one cell per line: price lines close a group */
+  const priceOnly=lines.filter(l=>money(l)!=null&&/\.\d{2}|₱/.test(l)).length;
+  if(!lines.some(cellsOf)&&priceOnly>=2&&priceOnly>=lines.length/6){
+    let group=[];for(const l of lines){
+      if(/\btotal\b/i.test(group.join(' '))&&money(l)!=null){total=money(l);group=[];continue}
+      if(money(l)!=null&&/\.\d{2}|₱/.test(l)){const r=fromCells([...group,l]);if(r&&!SKIP_RX.test(r.name))rows.push(r);group=[]}else if(!HEAD.test(l))group.push(l)}
+    return {items:rows,total};
   }
+  for(const l of lines){
+    let cells=cellsOf(l);
+    if(!cells){const m=l.match(/^(.*?)\s+(?:(\d+\.\d+\s*kg|\d+\s+(?:kg|g|pcs?)|\d+\s*[x×]\s*(?:₱|P)?\s*\d+(?:\.\d{2})?)\s+)?((?:₱|PHP|P)?\s*-?\d{1,3}(?:,\d{3})*\.\d{2}|₱\s*\d+(?:\.\d{1,2})?)\s*$/i);
+      if(!m)continue;cells=[m[1].replace(/^\d{1,3}[.)]\s+/,''),m[2]||'',m[3]].filter(Boolean)}
+    const r=fromCells(cells);if(!r)continue;
+    if(/\b(sub\s*-?\s*)?total\b|amount\s*due/i.test(r.name)){if(!/sub/i.test(r.name))total=r.price;continue}
+    if(SKIP_RX.test(r.name))continue;
+    rows.push(r);
+  }
+  return {items:rows,total};
+}
+function parseReceipt(text,opts){
+  if(opts&&opts.paste){const r=parsePaste(text);if(r.items.length)return r}
+  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[“”"'`]/g,'').replace(/\s+/g,' ').trim()).filter(Boolean);
+  let total=null;const toks=[];
+  /* price: 1-6 digits, optional thousands, decimal point possibly surrounded by a space, 2 decimals; up to 3 junk chars after */
+  const PRICE=/(?:^|\s)(-?[\dOo]{1,3}(?:,[\dOo]{3})*|[\dOo]{4,6})\s?[.,]\s?([\dOo]{2})(?=(?:\s*[^\s\d]{1,3}|\s+\d)?\s*$)/;
+  const QTY=/^\s*(\d+(?:[.,]\d{1,3})?)\s*(?:[xX*@]|pcs?\s*@|PC\s*@)\s*(\d{1,6}\s?[.,]\s?\d{2})(?:\s+(\d{1,6}\s?[.,]\s?\d{2}))?/;
+  for(const line of lines){
+    const q=line.match(QTY);
+    if(q){const qn=parseFloat(q[1].replace(',','.')),u=money_(q[2]);if(qn>0&&u){toks.push({t:'qty',q:qn,u,tot:q[3]?money_(q[3]):Math.round(qn*u*100)/100});continue}}
+    const m=line.match(PRICE);
+    let price=null,before=line;
+    if(m&&/\d/.test(m[1])){price=money_(m[1]+'.'+m[2]);before=line.slice(0,m.index).trim()}
+    if(/\btotal\b|amount\s*due|amt\s*due/i.test(before)&&!/sub\s*-?\s*total/i.test(before)){if(price>0)total=price;toks.push({t:'end'});continue}
+    if(SKIP_RX.test(before)||(price==null&&WEAK_RX.test(before))){toks.push({t:'skip'});continue}
+    const marked=/^\s*(?:[+*†‡]|[tf]\s)/.test(before);
+    const name=cleanName(before);const letters=(name.match(/[a-z]/gi)||[]).length;
+    if(letters<2){toks.push({t:'skip'});continue}
+    if(price!=null&&(price<=0||price>100000))price=null;
+    toks.push({t:'item',name,price,marked,letters,qty:''});
+  }
+  /* priceless lines count as items only when marked (+) or sitting next to a priced item / quantity line, and before the total */
+  const endAt=toks.findIndex(x=>x.t==='end');const lim=endAt<0?toks.length:endAt;
+  const isAnchor=x=>x&&((x.t==='item'&&x.price!=null)||x.t==='qty');
+  const items=[];const firstAnchor=toks.findIndex(isAnchor);
+  for(let i=0;i<lim;i++){const x=toks[i];if(x.t!=='item')continue;
+    if(x.price==null&&!(x.marked||(i>firstAnchor&&x.letters>=4&&(isAnchor(toks[i-1])||isAnchor(toks[i+1])))))continue;
+    x.i=i;items.push(x)}
+  /* quantity lines: decide whether this receipt prints them above or below the item, by checking the arithmetic */
+  const near=(a,b)=>a!=null&&b!=null&&Math.abs(a-b)<=Math.max(0.02,b*0.004);
+  const nextItem=i=>items.find(it=>it.i>i),prevItem=i=>[...items].reverse().find(it=>it.i<i);
+  let above=0,below=0;
+  toks.forEach((x,i)=>{if(x.t!=='qty')return;if(near(nextItem(i)&&nextItem(i).price,x.tot))above++;if(near(prevItem(i)&&prevItem(i).price,x.tot))below++});
+  const dirAbove=above>=below;
+  toks.forEach((x,i)=>{if(x.t!=='qty'||i>=lim)return;
+    const c=dirAbove?nextItem(i):prevItem(i);if(!c||c.qtyFrom!=null)return;
+    if(Math.abs((dirAbove?c.i-i:i-c.i))>2)return;
+    if(c.price!=null&&!near(c.price,x.tot))return;   /* arithmetic doesn't fit: leave both alone */
+    c.qtyFrom=i;c.qty=Number.isInteger(x.q)?x.q+'x':(+x.q.toFixed(3))+' kg';
+    c.price=x.tot;   /* quantity × unit price fixes small misreads like 207.10 for 207.70, and fills unreadable prices */
+  });
   return {items:items.map(({name,price,qty})=>({name,price,qty})),total};
 }
 const toks=s=>String(s).toLowerCase().replace(/[^a-z0-9ñ ]+/g,' ').split(/\s+/).filter(t=>t.length>=2);
@@ -393,7 +468,7 @@ function matchScore(itemName,rec){
 }
 function matchReceipt(found,listItems){
   const used=new Set();
-  const pairs=[];found.forEach((f,fi)=>listItems.forEach(it=>{const s=matchScore(it.name,f.name);if(s>=0.5)pairs.push([s,fi,it.id])}));
+  const pairs=[];found.forEach((f,fi)=>listItems.forEach(it=>{const s=it.name.toLowerCase()===String(f.name).toLowerCase()?2:matchScore(it.name,f.name);if(s>=0.5)pairs.push([s,fi,it.id])}));
   pairs.sort((a,b)=>b[0]-a[0]);const out=found.map(f=>({...f,match:'new',on:true}));const taken=new Set();
   for(const [s,fi,id] of pairs){if(taken.has(fi)||used.has(id))continue;out[fi].match=id;taken.add(fi);used.add(id)}
   return out;
@@ -431,7 +506,9 @@ function scanSheet(target){
     </select></div>
     <p style="margin:0 0 14px;color:var(--muted);font-size:.9rem">Take a clear, straight photo in good light. The text is read on your phone, and you can check every line before anything is added.</p>
     <div class="actions"><label class="btn primary block" style="cursor:pointer">${ICON.camera}Take photo<input type="file" id="scanCam" accept="image/*" capture="environment" hidden></label>
-    <label class="btn block" style="cursor:pointer">Choose a photo<input type="file" id="scanPick" accept="image/*" hidden></label></div>`);
+    <label class="btn block" style="cursor:pointer">Choose a photo<input type="file" id="scanPick" accept="image/*" hidden></label>
+    <button class="btn ghost block" data-act="pasteReceipt">Paste receipt text instead</button></div>
+    <p class="flabel" style="margin:12px 0 0">Tips: lay the receipt flat, fill the screen with just the item lines, avoid shadows. For long receipts, scan it in two parts.</p>`);
 }
 function readScanTo(){const el=$('#scanTo');if(!el)return;const [kind,id]=el.value.split(':');scanTarget=id?{kind,id}:{kind}}
 async function runScan(file){
@@ -443,18 +520,44 @@ async function runScan(file){
     set('Loading text reader (first time takes a few seconds)',.05);
     const w=await getOcr((st,p)=>{if(/recogniz/i.test(st))set('Reading text',.15+p*.85);else if(/load|init/i.test(st))set('Loading text reader',.05+p*.1)});
     const {data}=await w.recognize(canvas,{},{text:true,blocks:true});
-    const text=rowsText(data);const r=parseReceipt(text);
-    const isNew=target.kind==='newList'||target.kind==='newTpl';
-    scanState={target,rows:matchReceipt(r.items,targetItems(target)),total:r.total,text,
-      name:'Receipt '+new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'}),
-      bought:target.kind==='newList'||target.kind==='list'};
-    if(isNew)scanState.rows.forEach(x=>x.match='new');
-    reviewSheet();
+    finishScan(rowsText(data),target,false);
   }catch(e){
     console.error(e);
     sheet(`<h3>Couldn’t read the receipt</h3><p style="margin:0 0 14px;color:var(--muted)">${NATIVE||window.WB_LOCAL_OCR?'Something went wrong while reading the photo. Try again with a sharper photo.':'Receipt scanning couldn’t start here. It works in the Weekly Basket phone app, which reads receipts offline.'}</p>
       <div class="actions"><button class="btn primary block" data-act="scanAgain">Try again</button><button class="btn ghost block" data-act="closeSheet">Close</button></div>`);
   }
+}
+function finishScan(text,target,paste){
+  const r=parseReceipt(text,{paste});
+  const found=r.items.map(it=>{const a=learnedName(it.name,it.price);return {...it,raw:it.name,name:a?a.name:it.name,learned:!!a}});
+  const isNew=target.kind==='newList'||target.kind==='newTpl';
+  scanState={target,rows:matchReceipt(found,targetItems(target)),total:r.total,text,
+    name:'Receipt '+new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'}),
+    bought:target.kind==='newList'||target.kind==='list'};
+  scanState.rows.forEach(x=>{x.shown=x.name;if(isNew)x.match='new'});
+  reviewSheet();
+}
+/* ---- names learned from your corrections: "Coou Ambp Tt" -> "CDO Ulam Burger Patties" ---- */
+const normK=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return m||n;let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur}return prev[n]}
+function learnedName(raw,price){
+  const k=normK(raw);if(k.length<3)return null;let best=null,bs=0;
+  for(const a of state.aliases||[]){const r=1-lev(k,a.k)/Math.max(k.length,a.k.length);const need=(price&&a.price&&Math.abs(price-a.price)<0.01)?0.55:0.72;
+    if(r>=need&&r>bs){bs=r;best=a}}
+  return best;
+}
+function learn(raw,name,price){
+  const k=normK(raw);if(k.length<3||!name)return;state.aliases=state.aliases||[];
+  const i=state.aliases.findIndex(a=>a.k===k);const e={k,name,price:price||null,t:Date.now()};
+  if(i>=0)state.aliases[i]=e;else state.aliases.push(e);
+  if(state.aliases.length>500)state.aliases.sort((a,b)=>b.t-a.t).length=500;
+}
+function pasteSheet(){
+  readScanTo();
+  sheet(`<h3>Paste receipt text</h3><p style="margin:0 0 10px;color:var(--muted);font-size:.9rem">Paste a receipt read by ChatGPT, Google Lens or any app: one item per line with its price, e.g. “Purefoods Hotdog 1kg ₱189.00”. Tables copied from ChatGPT work too.</p>
+    <div class="field"><textarea id="pasteTxt" style="height:200px" placeholder="Purefoods Tender Juicy Hotdog 1kg   ₱189.00&#10;CDO Ulam Burger Patties   ₱71.50&#10;SMB Roast Pork   0.530 kg   ₱195.57"></textarea></div>
+    <div class="actions"><button class="btn primary block" data-act="pasteGo">Read items</button><button class="btn ghost block" data-act="scanAgain">Back</button></div>`);
 }
 function reviewSheet(){
   const st=scanState;if(!st)return;const t=st.target;const isNew=t.kind==='newList'||t.kind==='newTpl';const isTpl=t.kind==='tpl'||t.kind==='newTpl';
@@ -474,10 +577,11 @@ function reviewSheet(){
     ${!isTpl?`<label class="pick" style="border:0;padding:2px 0 8px"><input type="checkbox" data-scan="bought" ${st.bought?'checked':''}><span style="font-weight:500">Already bought: check items off and save prices <small>(untick to add them as things to buy)</small></span></label>`:''}
     <div id="scanRows">${st.rows.map((r,i)=>`<div class="srow ${r.on?'':'off'}" data-i="${i}">
       <label class="srow-on"><input type="checkbox" data-scan="on" ${r.on?'checked':''} aria-label="Use this line"></label>
-      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name">
+      <div class="srow-main"><input class="srow-name" data-scan="name" value="${esc(r.name)}" aria-label="Item name">${r.learned?`<span class="flabel" style="margin-top:-2px">✓ Name remembered from a past receipt</span>`:''}
         <div class="srow-sub">${isNew?`<span class="flabel" style="align-self:center">${r.qty?'Qty '+esc(r.qty):'New item'}</span>`:`<select data-scan="match" aria-label="Match to an item">${opts(r.match)}</select>`}
         <input class="srow-price" data-scan="price" inputmode="decimal" value="${r.price!=null?r.price.toFixed(2):''}" aria-label="Price"></div></div></div>`).join('')}</div>
-    <div class="actions" style="margin-top:14px"><button class="btn primary block" data-act="applyScan" ${(isTpl?added:matched+added)?'':'disabled'}>${label}</button>`
+    <p class="flabel" style="margin:10px 0 0">Fix any name once and it’s remembered for next time.</p>
+    <div class="actions" style="margin-top:12px"><button class="btn primary block" data-act="applyScan" ${(isTpl?added:matched+added)?'':'disabled'}>${label}</button>`
     :`<p style="margin:0 0 14px;color:var(--muted)">No item lines with prices were found. Try a straighter, closer photo with the whole receipt in view.</p><div class="actions">`}
     <button class="btn block" data-act="scanAgain">Scan another photo</button>
     <details style="margin-top:6px"><summary class="flabel" style="cursor:pointer">Show scanned text</summary><textarea readonly style="width:100%;height:160px;margin-top:8px;font-family:var(--mono);font-size:.8rem;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);padding:8px">${esc(st.text)}</textarea></details></div>`);
@@ -500,6 +604,10 @@ function applyScan(){
     if(byName[k]){const f=byName[k];f.count++;f.price=(f.price||0)+(r.price||0)||null;f.qty=f.count+'x';continue}
     byName[k]={name,price:r.price||null,qty:r.qty||'',count:1};fresh.push(byName[k])}
   const remember=(n,p)=>{if(p)state.prices[n.toLowerCase()]=p};
+  const tobj=targetObj(t);
+  for(const r of st.rows){if(!r.on||!r.raw)continue;
+    const fin=r.match!=='new'&&tobj?(tobj.items.find(i=>i.id===r.match)||{}).name:(r.name||'').trim();
+    if(fin&&(fin!==r.raw||r.learned))learn(r.raw,fin,r.price)}
   let m=0,a=0,dest=null;
   if(t.kind==='newList'||t.kind==='list'){
     let l=t.kind==='list'?L(t.id):null;
@@ -523,6 +631,7 @@ function applyScan(){
 }
 window.__wbParseReceipt=parseReceipt;window.__wbSpeechToText=speechToText;window.__wbMatchReceipt=matchReceipt;
 window.__wbRowsText=rowsText;
+window.__wbOcrImage=async(blob)=>{const c=await prepImage(blob);const w=await getOcr();const {data}=await w.recognize(c,{},{text:true,blocks:true});const text=rowsText(data);return {text,parsed:parseReceipt(text)}};
 window.__wbOcrSelfTest=async(canvas)=>{const w=await getOcr();const {data}=await w.recognize(canvas,{},{text:true,blocks:true});const text=rowsText(data);return {text,parsed:parseReceipt(text)}};
 
 function item(name,qty,extra){return Object.assign({id:uid(),name,qty:qty||'',cat:guessCat(name)},extra||{})}
@@ -875,6 +984,9 @@ const ACT={
   voiceGo(){voiceStart()},
   scanReceipt(){scanSheet(view.s==='list'?{kind:'list',id:view.id}:view.s==='tpl'?{kind:'tpl',id:view.id}:view.s==='report'?{kind:'list',id:view.id}:null)},
   scanAgain(){scanSheet(scanState?scanState.target:scanTarget)},
+  pasteReceipt(){pasteSheet()},
+  pasteGo(){const t=$('#pasteTxt').value;if(!t.trim()){toast('Paste the receipt text first');return}finishScan(t,scanTarget||{kind:'newList'},true);
+    if(!scanState.rows.length)toast('No lines with prices found in that text')},
   applyScan(){applyScan()},
   shareSheet(d){const pre=d&&d.pre;const act=state.lists.filter(l=>l.status==='active');
     const row=(k,id,name,meta,on)=>`<label class="pick"><input type="checkbox" data-k="${k}" value="${id}" ${on?'checked':''}><span>${esc(name)} <small>${meta}</small></span></label>`;
