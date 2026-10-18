@@ -842,7 +842,7 @@ function render(){
   fillSugg();
   if(focused==='addInput'&&$('#addInput'))$('#addInput').focus();
 }
-function paintSync(){const el=$('#sync');if(el)el.textContent=cloud?'Saved to your account, so it follows you across devices.':'Saved in this browser.'}
+function paintSync(){const el=$('#sync');if(el)el.textContent=cloud?'Saved to your account, so it follows you across devices.':(NATIVE?'Saved on this phone.':'Saved in this browser.')}
 
 function homeView(){
   const active=state.lists.filter(l=>l.status==='active');
@@ -866,7 +866,7 @@ function homeView(){
     <div class="meta">Your products, their last prices and how they’re printed on receipts. The receipt reader uses this to name items and check prices.</div></button>
   ${done.length?`<h2 class="eyebrow">History</h2><div class="items">${done.map(l=>{const got=l.items.filter(i=>i.done).length;
     return `<button class="hist" data-act="report" data-id="${l.id}"><div class="name">${esc(l.name)}<div class="meta" style="font-weight:400;color:var(--muted);font-size:.85rem">${dShort(l.finishedAt)} · ${got}/${l.items.length} items</div></div><span class="amt">${total(l)?money(total(l)):''}</span></button>`}).join('')}</div>`:''}
-  <p class="sync" id="sync">${cloud?'Saved to your account, so it follows you across devices.':'Saved in this browser.'}</p>`;
+  <p class="sync" id="sync">${cloud?'Saved to your account, so it follows you across devices.':(NATIVE?'Saved on this phone.':'Saved in this browser.')}</p>`;
 }
 
 function groupItems(items){
